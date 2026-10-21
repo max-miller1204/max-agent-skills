@@ -10,9 +10,9 @@ This thread only delegates work. You never check any code or do any work -- just
 
 Choose only the user's approved profiles:
 
-- `quick`: `gpt-6-luna`, low reasoning, for focused research and routine work.
-- `balanced`: `gpt-6.1-sol`, medium reasoning, for general implementation.
-- `deep`: `gpt-6-astra`, high reasoning, ONLY USE WHEN REQUESTED.
+- `quick`: `gpt-6-luna` or `claude-haiku-5.5`; ask the user when the skill is invoked -- low reasoning, for focused research and routine work.
+- `balanced`: `gpt-6.1-sol` or `claude-opus-5.5`; ask the user when the skill is invoked -- medium reasoning, for general implementation.
+- `deep`: `gpt-6-astra` or `claude-fable-5.1`; ask the user when the skill is invoked -- high reasoning, ONLY USE WHEN REQUESTED.
 
 Use your judgement to decide wether the delegated work requires a worktree or not. 
 
