@@ -1,0 +1,17 @@
+name: Improvement
+description: Make something that already exists better.
+labels: [improvement]
+projects: ["__PROJECT__"]
+body:
+  - type: textarea
+    id: current
+    attributes:
+      label: Today
+      description: How does it work now, and what is wrong with that?
+    validations:
+      required: true
+  - type: textarea
+    id: better
+    attributes:
+      label: Better
+      description: What should change?

@@ -1,0 +1,86 @@
+---
+name: __SKILL_NAME__
+description: >-
+  Linear-style workflow for the "__TITLE__" GitHub Projects board: triage inbox,
+  create issues with priority, estimate, and cycle, plan and review cycles,
+  manage project health and status updates, check overdue and SLA items, and
+  sync labels. Use when the user asks to triage, file an issue, plan or
+  review a cycle or sprint, update a project, or check what is overdue.
+---
+# __TITLE__ board
+
+Board: __PROJECT_URL__
+Linked repos: __REPOS__ (primary: __PRIMARY_REPO__)
+
+All project, field, and option IDs are in [config.json](config.json). Do not rediscover them. Run every command through the shared CLI, which is also used by the GitHub Actions:
+
+```
+export LINEAR_BOARD_CONFIG=.agents/skills/__SKILL_NAME__/config.json
+bash .github/linear-board/board.sh help
+```
+
+Run commands from the root of __PRIMARY_REPO__, with `LINEAR_BOARD_CONFIG` set as above. Below, `board` is short for `bash .github/linear-board/board.sh`. Refs look like `owner/repo#12`, `repo#12`, or `#12`. A bare number refers to the primary repo.
+
+## Model
+
+| Linear | Here |
+|---|---|
+| Workflow state | `Status`: Triage, Backlog, Todo, In Progress, In Review, Done, Canceled |
+| Priority | `Priority`: Urgent, High, Medium, Low, No priority |
+| Estimate | `Estimate`: __ESTIMATES__ |
+| Cycle | `Cycle` iteration, __CYCLE_DAYS__ days. Use `@current`, `@next`, `@last`, or a title such as "Cycle 3" |
+| Project | Parent issue labeled `project`, with sub-issues. Lead = assignee. `Target date`, `Health` |
+| Type | Label: bug, feature, improvement, chore |
+| Duplicate | Closed as duplicate, Status = Canceled |
+
+Automation that already runs, so do not repeat it by hand: a branch named `12-...` moves #12 to In Progress. An open PR moves it to In Review. A merge moves it to Done. Ended cycles roll over unfinished items. Backlog items get `stale` after __STALE_DAYS__ days. Urgent items get `sla-breach` after __SLA_HOURS__h with no activity. A weekly digest is posted as a project status update.
+
+## 1. Triage inbox
+
+1. Run `board triage`. It lists Triage items (oldest first) and items labeled `stale`.
+2. For each item, read the issue (`gh issue view N -R repo`). Propose a type, priority, and estimate, then ask the user. Decide one item at a time unless the user wants a batch.
+3. Apply the decision:
+   - Accept: `board set REF priority=High estimate=3` and then `board accept REF Todo` (or `Backlog`, the default). Add the type label with `gh issue edit N -R repo --add-label bug` if it is missing.
+   - Decline: `board decline REF "reason"`. This sets Canceled and closes the issue as not planned.
+   - Duplicate: `board duplicate REF ORIGINAL_REF`.
+   - A stale item that is still relevant: `board accept REF Backlog` (this removes `stale`). Otherwise, decline it.
+4. End with a summary: how many accepted, declined, and marked duplicate.
+
+## 2. Create an issue, Linear-style
+
+Ask only for the values that are missing. Use the defaults: type from context, priority "No priority", no estimate, no cycle.
+
+```
+board create --repo REPO --title "..." --body "..." --type bug|feature|improvement|chore \
+  --priority High --estimate 3 --cycle @current --due 2026-12-01 --parent '#4' --assignee @me
+```
+
+`--parent` makes the new issue a sub-issue of a project issue. Status defaults to Todo when a cycle is set, else Backlog. Use `--status Triage` to send the issue to the inbox. Report the URL.
+
+## 3. Cycle planning and review
+
+- Plan: `board plan --cycle @next` shows scope against the average velocity of the last 3 cycles (points completed), plus unscheduled Todo and Backlog candidates by priority. Propose a scope that fits capacity. After the user agrees, schedule each item: `board set REF cycle=@next`. If the cycle is over capacity, say which low-priority items to drop.
+- Review: `board review --cycle @last` (or a title). It shows completed, canceled, still open, rolled over, and scope added after the cycle start. Summarize it in a few lines and point out patterns (for example, repeated rollovers or large unestimated items).
+- List cycles: `board cycles`.
+
+## 4. Projects and health
+
+- Create: `board project-create --repo REPO --title "..." --lead LOGIN --target 2026-12-15 --health "On track"`.
+- Add work: `board project-add PROJECT_REF CHILD_REF`, or create the child with `board create --parent`.
+- Review: `board projects` shows the lead, target, health, and sub-issue progress.
+- Update health: `board set PROJECT_REF health="At risk" target=2027-01-10`.
+- Post a project status update (this shows on the board's status panel): `board status-update --status ON_TRACK|AT_RISK|OFF_TRACK|COMPLETE --body "..."`. Write the body from `projects`, `overdue`, and the current cycle. To get a draft of the automatic digest, run `board digest --dry-run`.
+
+## 5. Overdue and SLA
+
+Run `board overdue`. For each item, suggest an action: reschedule (`board set REF due=...`), raise the priority, reassign, or decline. Ask before you change anything.
+
+## 6. Label sync
+
+Run `board labels-sync`. It creates or updates the standard labels (types, `project`, `stale`, `sla-breach`, `rolled-over`) in every linked repo. To add a label everywhere, add it to `labels` in config.json and in `.github/linear-board.json` in each repo, then run the sync.
+
+## Rules
+
+- Ask before you close, decline, or bulk-edit issues.
+- Use the CLI for writes. For something the CLI does not cover, use `gh api graphql` with the IDs from config.json.
+- Item JSON for custom queries: `board items --status Todo | jq ...`.

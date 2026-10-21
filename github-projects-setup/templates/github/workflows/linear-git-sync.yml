@@ -1,0 +1,26 @@
+# Installed by github-projects-setup. Moves board items as work happens:
+# branch "12-fix-login" -> In Progress (and assigns the creator), PR opened or
+# ready -> In Review, PR merged -> Done, new issue with no Status -> Triage,
+# issue closed as not planned or duplicate -> Canceled.
+name: "board: git-sync"
+
+on:
+  create:
+  pull_request:
+    types: [opened, reopened, ready_for_review, converted_to_draft, closed]
+  issues:
+    types: [opened, closed]
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - run: bash .github/linear-board/board.sh git-sync
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
