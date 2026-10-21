@@ -31,8 +31,7 @@ Open each view. Use the view menu (the arrow next to the tab name) or the toolba
 | Projects | Sort by: Target date. Fields shown: Assignees (the lead), Target date, Health, Sub-issues progress. |
 | Roadmap | Dates: start = (none) or Created, target = **Target date**. Zoom: Quarter. |
 | Cycles | Group by: Cycle. In the Estimate column menu, choose **Sum**. |
-| Overdue | Sort by: Due date, ascending. |
-| SLA breach | Sort by: Updated, ascending. |
+| Overdue / SLA | Sort by: Due date, ascending. To split the two kinds, group by Labels (optional). |
 
 Delete any view tab that you do not need: open the view menu, then **Delete view**.
 

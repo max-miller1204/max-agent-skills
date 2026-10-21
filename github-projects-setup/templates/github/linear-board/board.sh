@@ -48,6 +48,7 @@ Automation (used by GitHub Actions)
   rollover                          Move unfinished items out of ended cycles, keep cycles ahead
   stale [--days 60] [--repo R]      Label untouched Backlog items stale
   sla [--hours 24] [--repo R]       Label Urgent items with no recent activity sla-breach
+  flag-overdue [--repo R]           Label items past their due date overdue (and clear it)
   digest [--dry-run]                Post a weekly project status update
 
 Refs: owner/repo#12, repo#12, #12 or 12 (defaults to $GITHUB_REPOSITORY or the primary repo).
@@ -770,6 +771,25 @@ cmd_sla() {
     done
 }
 
+# Due date passed and still active -> "overdue" label (so one view can show overdue + SLA
+# items with label:overdue,sla-breach). The label is removed once that stops being true.
+cmd_flag_overdue() {
+  local repo=${GITHUB_REPOSITORY:-}
+  while (($#)); do case $1 in --repo) repo=$2; shift 2 ;; *) die "flag-overdue: unknown arg $1" ;; esac; done
+  local all
+  all=$(items_json | jq --arg r "$repo" '[.[] | select(.ref != null and ($r == "" or .repo == $r))]')
+  jq -c --arg t "$TODAY" ".[] | select(.dueDate != null and .dueDate < \$t and $ACTIVE and ((.labels | index(\"overdue\")) | not))" <<<"$all" |
+    while read -r m; do
+      add_label "$(jq -r .repo <<<"$m")" "$(jq -r .number <<<"$m")" overdue
+      log "overdue: $(jq -r .ref <<<"$m") (due $(jq -r .dueDate <<<"$m"))"
+    done
+  jq -c --arg t "$TODAY" ".[] | select((.labels | index(\"overdue\")) and ((.dueDate != null and .dueDate < \$t and $ACTIVE) | not))" <<<"$all" |
+    while read -r m; do
+      remove_label "$(jq -r .repo <<<"$m")" "$(jq -r .number <<<"$m")" overdue
+      log "cleared overdue: $(jq -r .ref <<<"$m")"
+    done
+}
+
 cmd_digest() {
   local dry=false
   [[ ${1:-} == --dry-run ]] && dry=true
@@ -832,6 +852,7 @@ case $cmd in
   rollover) cmd_rollover ;;
   stale) cmd_stale "$@" ;;
   sla) cmd_sla "$@" ;;
+  flag-overdue) cmd_flag_overdue "$@" ;;
   digest) cmd_digest "$@" ;;
   help | -h | --help) usage ;;
   *) usage >&2; exit 2 ;;

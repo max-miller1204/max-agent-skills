@@ -33,7 +33,7 @@ Run commands from the root of __PRIMARY_REPO__, with `LINEAR_BOARD_CONFIG` set a
 | Type | Label: bug, feature, improvement, chore |
 | Duplicate | Closed as duplicate, Status = Canceled |
 
-Automation that already runs, so do not repeat it by hand: a branch named `12-...` moves #12 to In Progress. An open PR moves it to In Review. A merge moves it to Done. Ended cycles roll over unfinished items. Backlog items get `stale` after __STALE_DAYS__ days. Urgent items get `sla-breach` after __SLA_HOURS__h with no activity. A weekly digest is posted as a project status update.
+Automation that already runs, so do not repeat it by hand: a branch named `12-...` moves #12 to In Progress. An open PR moves it to In Review. A merge moves it to Done. Ended cycles roll over unfinished items. Backlog items get `stale` after __STALE_DAYS__ days. Urgent items get `sla-breach` after __SLA_HOURS__h with no activity. Items past their due date get `overdue` (hourly). A weekly digest is posted as a project status update.
 
 ## 1. Triage inbox
 
@@ -77,7 +77,7 @@ Run `board overdue`. For each item, suggest an action: reschedule (`board set RE
 
 ## 6. Label sync
 
-Run `board labels-sync`. It creates or updates the standard labels (types, `project`, `stale`, `sla-breach`, `rolled-over`) in every linked repo. To add a label everywhere, add it to `labels` in config.json and in `.github/linear-board.json` in each repo, then run the sync.
+Run `board labels-sync`. It creates or updates the standard labels (types, `project`, `stale`, `overdue`, `sla-breach`, `rolled-over`) in every linked repo. To add a label everywhere, add it to `labels` in config.json and in `.github/linear-board.json` in each repo, then run the sync.
 
 ## Rules
 

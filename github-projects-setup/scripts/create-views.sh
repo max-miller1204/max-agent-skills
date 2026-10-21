@@ -2,7 +2,9 @@
 # create-views.sh --config FILE
 # Creates the Linear-style views (layout, filter, visible fields). The default
 # "View 1" becomes Triage. Grouping, sorting, field sums and roadmap dates are not
-# exposed by the API; summary.sh prints those as manual steps.
+# exposed by the API; summary.sh prints those as manual steps. "Overdue / SLA" uses the
+# overdue and sla-breach labels kept current by the urgent-sla Action, because project
+# filters cannot OR across different fields (due date vs label).
 source "$(dirname "$0")/common.sh"
 [[ ${1:-} == --config && -n ${2:-} ]] || die "usage: create-views.sh --config FILE"
 load_config "$2"
@@ -23,8 +25,7 @@ All issues|TABLE_LAYOUT||Title,Status,Priority,Estimate,Assignees,Cycle,Labels,D
 Projects|TABLE_LAYOUT|label:project|Title,Assignees,Status,Health,Target date,Sub-issues progress
 Roadmap|ROADMAP_LAYOUT|label:project|
 Cycles|TABLE_LAYOUT|has:cycle|Title,Cycle,Status,Estimate,Assignees
-Overdue|TABLE_LAYOUT|due-date:<@today -status:Done,Canceled|Title,Due date,Status,Priority,Assignees
-SLA breach|TABLE_LAYOUT|label:sla-breach|Title,Priority,Status,Assignees,Updated
+Overdue / SLA|TABLE_LAYOUT|label:overdue,sla-breach -status:Done,Canceled|Title,Labels,Due date,Priority,Status,Assignees,Updated
 V
 )
 

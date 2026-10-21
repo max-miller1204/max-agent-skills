@@ -1,24 +1,84 @@
 {
   "status": [
-    {"name": "Triage", "color": "ORANGE", "description": "New, not yet reviewed"},
-    {"name": "Backlog", "color": "GRAY", "description": "Accepted, not scheduled"},
-    {"name": "Todo", "color": "BLUE", "description": "Scheduled, not started"},
-    {"name": "In Progress", "color": "YELLOW", "description": "Actively being worked on"},
-    {"name": "In Review", "color": "GREEN", "description": "Pull request open for review"},
-    {"name": "Done", "color": "PURPLE", "description": "Completed"},
-    {"name": "Canceled", "color": "GRAY", "description": "Declined, duplicate, or abandoned"}
+    {
+      "name": "Triage",
+      "color": "ORANGE",
+      "description": "New, not yet reviewed"
+    },
+    {
+      "name": "Backlog",
+      "color": "GRAY",
+      "description": "Accepted, not scheduled"
+    },
+    {
+      "name": "Todo",
+      "color": "BLUE",
+      "description": "Scheduled, not started"
+    },
+    {
+      "name": "In Progress",
+      "color": "YELLOW",
+      "description": "Actively being worked on"
+    },
+    {
+      "name": "In Review",
+      "color": "GREEN",
+      "description": "Pull request open for review"
+    },
+    {
+      "name": "Done",
+      "color": "PURPLE",
+      "description": "Completed"
+    },
+    {
+      "name": "Canceled",
+      "color": "GRAY",
+      "description": "Declined, duplicate, or abandoned"
+    }
   ],
   "priority": [
-    {"name": "Urgent", "color": "RED", "description": "Drop everything"},
-    {"name": "High", "color": "ORANGE", "description": ""},
-    {"name": "Medium", "color": "YELLOW", "description": ""},
-    {"name": "Low", "color": "BLUE", "description": ""},
-    {"name": "No priority", "color": "GRAY", "description": ""}
+    {
+      "name": "Urgent",
+      "color": "RED",
+      "description": "Drop everything"
+    },
+    {
+      "name": "High",
+      "color": "ORANGE",
+      "description": ""
+    },
+    {
+      "name": "Medium",
+      "color": "YELLOW",
+      "description": ""
+    },
+    {
+      "name": "Low",
+      "color": "BLUE",
+      "description": ""
+    },
+    {
+      "name": "No priority",
+      "color": "GRAY",
+      "description": ""
+    }
   ],
   "health": [
-    {"name": "On track", "color": "GREEN", "description": ""},
-    {"name": "At risk", "color": "YELLOW", "description": ""},
-    {"name": "Off track", "color": "RED", "description": ""}
+    {
+      "name": "On track",
+      "color": "GREEN",
+      "description": ""
+    },
+    {
+      "name": "At risk",
+      "color": "YELLOW",
+      "description": ""
+    },
+    {
+      "name": "Off track",
+      "color": "RED",
+      "description": ""
+    }
   ],
   "fieldNames": {
     "status": "Status",
@@ -29,17 +89,70 @@
     "dueDate": "Due date",
     "health": "Health"
   },
-  "estimateScale": [1, 2, 3, 5, 8],
-  "issueTypes": ["bug", "feature", "improvement", "chore"],
-  "labels": [
-    {"name": "bug", "color": "d73a4a", "description": "Something is broken"},
-    {"name": "feature", "color": "a2eeef", "description": "New capability"},
-    {"name": "improvement", "color": "7057ff", "description": "Make something existing better"},
-    {"name": "chore", "color": "cfd3d7", "description": "Maintenance, no user-facing change"},
-    {"name": "project", "color": "0e8a16", "description": "Parent issue that groups sub-issues into a project"},
-    {"name": "stale", "color": "fbca04", "description": "Backlog item untouched for a long time; review in triage"},
-    {"name": "sla-breach", "color": "b60205", "description": "Urgent item with no recent activity"},
-    {"name": "rolled-over", "color": "c5def5", "description": "Unfinished when its cycle ended; moved to the next cycle"}
+  "estimateScale": [
+    1,
+    2,
+    3,
+    5,
+    8
   ],
-  "settings": {"staleDays": 60, "slaHours": 24, "archiveDays": 14, "upcomingCycles": 3}
+  "issueTypes": [
+    "bug",
+    "feature",
+    "improvement",
+    "chore"
+  ],
+  "labels": [
+    {
+      "name": "bug",
+      "color": "d73a4a",
+      "description": "Something is broken"
+    },
+    {
+      "name": "feature",
+      "color": "a2eeef",
+      "description": "New capability"
+    },
+    {
+      "name": "improvement",
+      "color": "7057ff",
+      "description": "Make something existing better"
+    },
+    {
+      "name": "chore",
+      "color": "cfd3d7",
+      "description": "Maintenance, no user-facing change"
+    },
+    {
+      "name": "project",
+      "color": "0e8a16",
+      "description": "Parent issue that groups sub-issues into a project"
+    },
+    {
+      "name": "stale",
+      "color": "fbca04",
+      "description": "Backlog item untouched for a long time; review in triage"
+    },
+    {
+      "name": "overdue",
+      "color": "e99695",
+      "description": "Past its due date and not done"
+    },
+    {
+      "name": "sla-breach",
+      "color": "b60205",
+      "description": "Urgent item with no recent activity"
+    },
+    {
+      "name": "rolled-over",
+      "color": "c5def5",
+      "description": "Unfinished when its cycle ended; moved to the next cycle"
+    }
+  ],
+  "settings": {
+    "staleDays": 60,
+    "slaHours": 24,
+    "archiveDays": 14,
+    "upcomingCycles": 3
+  }
 }
