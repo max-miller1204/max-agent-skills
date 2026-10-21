@@ -42,5 +42,4 @@ After launching a task, confirm that the returned provider, model, and options m
 - When a task reports back, give a short summary: what the user needs to do or look at. Do not restate the full report.
 - Link threads as `[title](t3-thread://v1/<threadId>)` and link PRs directly.
 - When a task needs a user decision, ask with AskUserQuestion, then pass the answer back.
-- Get secrets with `request_secret`. Never ask for them in chat.
 - Register every PR a task opens with `link_pull_request`.
