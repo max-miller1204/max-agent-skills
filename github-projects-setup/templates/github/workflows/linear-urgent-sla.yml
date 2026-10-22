@@ -1,0 +1,31 @@
+# Installed by github-projects-setup. Urgent issues in this repo with no
+# activity for the SLA window get the "sla-breach" label and a comment. Items
+# past their due date get the "overdue" label (feeds the "Overdue / SLA" view).
+name: "board: urgent-sla"
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "Hours without activity (default from .github/linear-board.json)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  sla:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - run: bash .github/linear-board/board.sh sla ${HOURS:+--hours "$HOURS"}
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          HOURS: ${{ inputs.hours }}
+      - run: bash .github/linear-board/board.sh flag-overdue
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}

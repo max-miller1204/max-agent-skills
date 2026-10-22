@@ -1,0 +1,22 @@
+# Installed by github-projects-setup (primary repo only). When a cycle ends,
+# moves unfinished items into the current cycle and keeps 3 cycles scheduled ahead.
+name: "board: cycle-rollover"
+
+on:
+  schedule:
+    - cron: "15 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rollover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - run: bash .github/linear-board/board.sh rollover
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}

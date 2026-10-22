@@ -1,0 +1,30 @@
+# Installed by github-projects-setup. Moves board items as work happens:
+# branch "12-fix-login" -> In Progress (and assigns the creator, except on Solo
+# boards), PR opened or ready -> In Review (In Progress on boards without it),
+# PR merged -> Done, new issue with no Status -> the inbox (Triage, Backlog, or
+# Todo), issue closed as not planned or duplicate -> Canceled (when the board
+# has it). Also warns on the issue when the board is over its WIP limit and
+# refreshes the Hackathon README countdown. Settings come from
+# .github/linear-board.json.
+name: "board: git-sync"
+
+on:
+  create:
+  pull_request:
+    types: [opened, reopened, ready_for_review, converted_to_draft, closed]
+  issues:
+    types: [opened, closed]
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - run: bash .github/linear-board/board.sh git-sync
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}

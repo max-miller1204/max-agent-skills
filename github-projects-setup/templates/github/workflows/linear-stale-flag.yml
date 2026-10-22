@@ -1,0 +1,27 @@
+# Installed by github-projects-setup. Labels Backlog issues in this repo that
+# nobody has touched for a while as "stale" so the triage pass reviews them.
+name: "board: stale-flag"
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days without activity (default from .github/linear-board.json)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - run: bash .github/linear-board/board.sh stale ${DAYS:+--days "$DAYS"}
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          DAYS: ${{ inputs.days }}

@@ -1,0 +1,546 @@
+{
+  "statuses": [
+    {
+      "name": "Triage",
+      "color": "ORANGE",
+      "description": "New, not yet reviewed",
+      "presets": [
+        "full"
+      ]
+    },
+    {
+      "name": "Backlog",
+      "color": "GRAY",
+      "description": "Accepted, not scheduled",
+      "descriptionSelfPaced": "Later: accepted, not next yet",
+      "presets": [
+        "full",
+        "solo"
+      ]
+    },
+    {
+      "name": "Todo",
+      "color": "BLUE",
+      "description": "Scheduled, not started",
+      "descriptionSelfPaced": "Next: pick these up first"
+    },
+    {
+      "name": "In Progress",
+      "color": "YELLOW",
+      "description": "Actively being worked on",
+      "descriptionSelfPaced": "Now: actively being worked on"
+    },
+    {
+      "name": "In Review",
+      "color": "GREEN",
+      "description": "Pull request open for review",
+      "presets": [
+        "full",
+        "solo"
+      ]
+    },
+    {
+      "name": "Done",
+      "color": "PURPLE",
+      "description": "Completed"
+    },
+    {
+      "name": "Canceled",
+      "color": "GRAY",
+      "description": "Declined, duplicate, or abandoned",
+      "presets": [
+        "full",
+        "solo"
+      ]
+    }
+  ],
+  "inboxOrder": [
+    "Triage",
+    "Backlog",
+    "Todo"
+  ],
+  "priority": [
+    {
+      "name": "Urgent",
+      "color": "RED",
+      "description": "Drop everything"
+    },
+    {
+      "name": "High",
+      "color": "ORANGE",
+      "description": ""
+    },
+    {
+      "name": "Medium",
+      "color": "YELLOW",
+      "description": ""
+    },
+    {
+      "name": "Low",
+      "color": "BLUE",
+      "description": ""
+    },
+    {
+      "name": "No priority",
+      "color": "GRAY",
+      "description": ""
+    }
+  ],
+  "health": [
+    {
+      "name": "On track",
+      "color": "GREEN",
+      "description": ""
+    },
+    {
+      "name": "At risk",
+      "color": "YELLOW",
+      "description": ""
+    },
+    {
+      "name": "Off track",
+      "color": "RED",
+      "description": ""
+    }
+  ],
+  "fields": [
+    {
+      "key": "status",
+      "name": "Status",
+      "dataType": "SINGLE_SELECT",
+      "builtin": true
+    },
+    {
+      "key": "priority",
+      "name": "Priority",
+      "dataType": "SINGLE_SELECT",
+      "options": "priority"
+    },
+    {
+      "key": "estimate",
+      "name": "Estimate",
+      "dataType": "NUMBER",
+      "presets": [
+        "full",
+        "solo"
+      ]
+    },
+    {
+      "key": "cycle",
+      "name": "Cycle",
+      "dataType": "ITERATION",
+      "paces": [
+        "timeboxed"
+      ]
+    },
+    {
+      "key": "targetDate",
+      "name": "Target date",
+      "dataType": "DATE",
+      "presets": [
+        "full",
+        "solo"
+      ],
+      "paces": [
+        "timeboxed"
+      ]
+    },
+    {
+      "key": "dueDate",
+      "name": "Due date",
+      "dataType": "DATE",
+      "flags": [
+        "dueDate"
+      ]
+    },
+    {
+      "key": "health",
+      "name": "Health",
+      "dataType": "SINGLE_SELECT",
+      "options": "health",
+      "presets": [
+        "full",
+        "solo"
+      ],
+      "paces": [
+        "timeboxed"
+      ]
+    }
+  ],
+  "flagDefaults": {
+    "dueDate": {
+      "presets": [
+        "full",
+        "solo"
+      ],
+      "paces": [
+        "timeboxed"
+      ]
+    }
+  },
+  "estimateScale": [
+    1,
+    2,
+    3,
+    5,
+    8
+  ],
+  "labels": [
+    {
+      "name": "bug",
+      "color": "d73a4a",
+      "description": "Something is broken",
+      "type": true
+    },
+    {
+      "name": "feature",
+      "color": "a2eeef",
+      "description": "New capability",
+      "type": true
+    },
+    {
+      "name": "improvement",
+      "color": "7057ff",
+      "description": "Make something existing better",
+      "type": true,
+      "presets": [
+        "full"
+      ]
+    },
+    {
+      "name": "chore",
+      "color": "cfd3d7",
+      "description": "Maintenance, no user-facing change",
+      "type": true
+    },
+    {
+      "name": "project",
+      "color": "0e8a16",
+      "description": "Parent issue that groups sub-issues into a project",
+      "presets": [
+        "full",
+        "solo"
+      ]
+    },
+    {
+      "name": "stale",
+      "color": "fbca04",
+      "description": "Backlog item untouched for a long time; review in triage",
+      "presets": [
+        "full",
+        "solo"
+      ]
+    },
+    {
+      "name": "overdue",
+      "color": "e99695",
+      "description": "Past its due date and not done",
+      "presets": [
+        "full",
+        "solo"
+      ],
+      "paces": [
+        "timeboxed"
+      ],
+      "flags": [
+        "dueDate"
+      ]
+    },
+    {
+      "name": "sla-breach",
+      "color": "b60205",
+      "description": "Urgent item with no recent activity",
+      "presets": [
+        "full",
+        "solo"
+      ],
+      "paces": [
+        "timeboxed"
+      ]
+    },
+    {
+      "name": "rolled-over",
+      "color": "c5def5",
+      "description": "Unfinished when its cycle ended; moved to the next cycle",
+      "paces": [
+        "timeboxed"
+      ]
+    }
+  ],
+  "views": [
+    {
+      "name": "Triage",
+      "layout": "TABLE_LAYOUT",
+      "filter": "status:Triage",
+      "fields": [
+        "Title",
+        "Labels",
+        "Priority",
+        "Estimate",
+        "Repository",
+        "Created"
+      ],
+      "manual": "Sort by: Created, descending.",
+      "presets": [
+        "full"
+      ]
+    },
+    {
+      "name": "Backlog",
+      "layout": "TABLE_LAYOUT",
+      "filter": "status:Backlog",
+      "fields": [
+        "Title",
+        "Priority",
+        "Estimate",
+        "Labels",
+        "Assignees",
+        "Cycle"
+      ],
+      "manual": "Group by: Priority. Sort by: Priority.",
+      "presets": [
+        "full",
+        "solo"
+      ]
+    },
+    {
+      "name": "Active cycle",
+      "layout": "BOARD_LAYOUT",
+      "filter": "cycle:@current",
+      "fields": [
+        "Title",
+        "Assignees",
+        "Priority",
+        "Estimate",
+        "Labels"
+      ],
+      "manual": "Column by: Status (this is the default). Swimlanes (optional): Priority.",
+      "paces": [
+        "timeboxed"
+      ]
+    },
+    {
+      "name": "Now / Next / Later",
+      "layout": "BOARD_LAYOUT",
+      "filter": "",
+      "excludeStatuses": [
+        "Triage",
+        "Done",
+        "Canceled"
+      ],
+      "fields": [
+        "Title",
+        "Assignees",
+        "Priority",
+        "Estimate",
+        "Labels"
+      ],
+      "manual": "Column by: Status (this is the default). Columns read <!-- backlog -->Later = Backlog, <!-- /backlog -->Next = Todo, Now = In Progress<!-- review --> and In Review<!-- /review -->. Sort by: Priority.",
+      "paces": [
+        "self-paced"
+      ]
+    },
+    {
+      "name": "Upcoming cycle",
+      "layout": "BOARD_LAYOUT",
+      "filter": "cycle:@next",
+      "fields": [
+        "Title",
+        "Assignees",
+        "Priority",
+        "Estimate",
+        "Labels"
+      ],
+      "manual": "Column by: Status.",
+      "presets": [
+        "full"
+      ],
+      "paces": [
+        "timeboxed"
+      ]
+    },
+    {
+      "name": "My issues",
+      "layout": "TABLE_LAYOUT",
+      "filter": "assignee:@me",
+      "excludeStatuses": [
+        "Done",
+        "Canceled"
+      ],
+      "fields": [
+        "Title",
+        "Status",
+        "Priority",
+        "Estimate",
+        "Cycle",
+        "Due date"
+      ],
+      "manual": "Sort by: Priority.",
+      "presets": [
+        "full"
+      ]
+    },
+    {
+      "name": "All issues",
+      "layout": "TABLE_LAYOUT",
+      "filter": "",
+      "fields": [
+        "Title",
+        "Status",
+        "Priority",
+        "Estimate",
+        "Assignees",
+        "Cycle",
+        "Labels",
+        "Due date"
+      ],
+      "manual": "Group by: Status. Sort by: Priority."
+    },
+    {
+      "name": "Projects",
+      "layout": "TABLE_LAYOUT",
+      "filter": "label:project",
+      "fields": [
+        "Title",
+        "Assignees",
+        "Status",
+        "Health",
+        "Target date",
+        "Sub-issues progress"
+      ],
+      "manual": "Sort by: Target date (Timeboxed) or Created (Self-paced). Fields shown: Assignees (the lead), Sub-issues progress, and Target date and Health when the board has them.",
+      "presets": [
+        "full",
+        "solo"
+      ]
+    },
+    {
+      "name": "Roadmap",
+      "layout": "ROADMAP_LAYOUT",
+      "filter": "label:project",
+      "manual": "Dates: start = (none) or Created, target = **Target date**. Zoom: Quarter.",
+      "presets": [
+        "full"
+      ],
+      "paces": [
+        "timeboxed"
+      ]
+    },
+    {
+      "name": "Cycles",
+      "layout": "TABLE_LAYOUT",
+      "filter": "has:cycle",
+      "fields": [
+        "Title",
+        "Cycle",
+        "Status",
+        "Estimate",
+        "Assignees"
+      ],
+      "manual": "Group by: Cycle. In the Estimate column menu, choose **Sum**.",
+      "presets": [
+        "full"
+      ],
+      "paces": [
+        "timeboxed"
+      ]
+    },
+    {
+      "name": "Overdue / SLA",
+      "layout": "TABLE_LAYOUT",
+      "filter": "label:overdue,sla-breach",
+      "excludeStatuses": [
+        "Done",
+        "Canceled"
+      ],
+      "fields": [
+        "Title",
+        "Labels",
+        "Due date",
+        "Priority",
+        "Status",
+        "Assignees",
+        "Updated"
+      ],
+      "manual": "Sort by: Due date, ascending. To split the two kinds, group by Labels (optional).",
+      "presets": [
+        "full"
+      ],
+      "paces": [
+        "timeboxed"
+      ]
+    }
+  ],
+  "workflows": [
+    {
+      "file": "linear-git-sync.yml"
+    },
+    {
+      "file": "linear-stale-flag.yml",
+      "presets": [
+        "full",
+        "solo"
+      ]
+    },
+    {
+      "file": "linear-urgent-sla.yml",
+      "presets": [
+        "full",
+        "solo"
+      ],
+      "paces": [
+        "timeboxed"
+      ]
+    },
+    {
+      "file": "linear-cycle-rollover.yml",
+      "primary": true,
+      "presets": [
+        "full",
+        "solo"
+      ],
+      "paces": [
+        "timeboxed"
+      ]
+    },
+    {
+      "file": "linear-weekly-digest.yml",
+      "primary": true,
+      "presets": [
+        "full",
+        "solo"
+      ]
+    }
+  ],
+  "issueTemplates": [
+    {
+      "file": "config.yml"
+    },
+    {
+      "file": "bug.yml"
+    },
+    {
+      "file": "feature.yml"
+    },
+    {
+      "file": "improvement.yml",
+      "presets": [
+        "full"
+      ]
+    }
+  ],
+  "behaviors": {
+    "assignOnBranch": {
+      "presets": [
+        "full",
+        "hackathon"
+      ]
+    }
+  },
+  "settings": {
+    "staleDays": 60,
+    "slaHours": 24,
+    "archiveDays": 14,
+    "upcomingCycles": 3
+  }
+}

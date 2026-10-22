@@ -1,0 +1,236 @@
+---
+name: __SKILL_NAME__
+<!-- when: timeboxed -->
+description: >-
+  Linear-style workflow for the "__TITLE__" GitHub Projects board: triage inbox,
+  create issues with priority and cycle, plan and review cycles, manage
+  projects, check overdue and SLA items, sync labels, and upgrade the board.
+  Use when the user asks to triage, file an issue, plan or review a cycle or
+  sprint, update a project, check what is overdue, or upgrade the board.
+<!-- end -->
+<!-- when: self-paced -->
+description: >-
+  Self-paced workflow for the "__TITLE__" GitHub Projects board: triage inbox,
+  create issues with priority, pick what to work on next (with a WIP limit),
+  log what got done, manage projects, sync labels, and upgrade the board. Use
+  when the user asks to triage, file an issue, decide what is next, see what
+  got done, update a project, or upgrade the board.
+<!-- end -->
+---
+# __TITLE__ board
+
+Board: __PROJECT_URL__
+Linked repos: __REPOS__ (primary: __PRIMARY_REPO__)
+Setup: **__PRESET__** preset, **__PACE__** pace.
+<!-- when: wip -->
+WIP limit: __WIP__ items In Progress. Over the limit, warn the user. Never block or move their work.
+<!-- end -->
+<!-- when: endDate -->
+Ends: __END_DATE__ (countdown in the project README).
+<!-- end -->
+
+All project, field, and option IDs are in [config.json](config.json) (a link to `.github/linear-board.json`). Do not rediscover them. Run every command through the shared CLI, which is also used by the GitHub Actions:
+
+```
+export LINEAR_BOARD_CONFIG=.agents/skills/__SKILL_NAME__/config.json
+bash .github/linear-board/board.sh help
+```
+
+Run commands from the root of __PRIMARY_REPO__, with `LINEAR_BOARD_CONFIG` set as above. Below, `board` is short for `bash .github/linear-board/board.sh`. Refs look like `owner/repo#12`, `repo#12`, or `#12`. A bare number refers to the primary repo. `board profile` shows what this board has. A command for a feature the board does not have fails with a message that names the upgrade.
+
+## Model
+
+| Linear | Here |
+|---|---|
+| Workflow state | `Status`: __STATUSES__ |
+<!-- when: self-paced -->
+| Now / Next / Later | Now = In Progress<!-- review --> and In Review<!-- /review -->, Next = Todo<!-- backlog -->, Later = Backlog<!-- /backlog --> |
+<!-- end -->
+| Priority | `Priority`: Urgent, High, Medium, Low, No priority |
+<!-- when: estimate -->
+| Estimate | `Estimate`: __ESTIMATES__ |
+<!-- end -->
+<!-- when: cycle -->
+| Cycle | `Cycle` iteration, __CYCLE_DAYS__ days. Use `@current`, `@next`, `@last`, or a title such as "Cycle 3" |
+<!-- end -->
+<!-- when: projects timeboxed -->
+| Project | Parent issue labeled `project`, with sub-issues. Lead = assignee. `Target date`, `Health` |
+<!-- end -->
+<!-- when: projects self-paced -->
+| Project | Parent issue labeled `project`, with sub-issues. Lead = assignee. Progress = sub-issues done (no target date or health) |
+<!-- end -->
+| Type | Label: __TYPES_LIST__ |
+<!-- when: canceled -->
+| Duplicate | Closed as duplicate, Status = Canceled |
+<!-- end -->
+<!-- when: !canceled -->
+| Duplicate | Closed as duplicate (there is no Canceled status) |
+<!-- end -->
+
+Automation that already runs, so do not repeat it by hand:
+
+- New issues with no Status land in **__INBOX__**.
+<!-- when: assign -->
+- A branch named `12-...` moves #12 to In Progress and assigns the branch creator.
+<!-- end -->
+<!-- when: !assign -->
+- A branch named `12-...` moves #12 to In Progress.
+<!-- end -->
+<!-- when: review -->
+- An open PR moves it to In Review. A merge moves it to Done.
+<!-- end -->
+<!-- when: !review -->
+- A merged PR moves it to Done.
+<!-- end -->
+<!-- when: wip -->
+- When an issue moves to In Progress and the board is over the WIP limit, git-sync comments on the issue. It does not block anything.
+<!-- end -->
+<!-- when: cycle-rollover -->
+- Ended cycles roll over unfinished items (daily).
+<!-- end -->
+<!-- when: stale -->
+- Backlog items get `stale` after __STALE_DAYS__ days without activity (weekly).
+<!-- end -->
+<!-- when: sla -->
+- Urgent items get `sla-breach` after __SLA_HOURS__h with no activity (hourly).
+<!-- end -->
+<!-- when: overdue -->
+- Items past their due date get `overdue` (hourly).
+<!-- end -->
+<!-- when: weekly-digest timeboxed -->
+- A weekly digest is posted as a project status update (completed, in progress, rolled over, at risk, overdue).
+<!-- end -->
+<!-- when: weekly-digest self-paced -->
+- A weekly "what got done" log is posted as a project status update. It has no status and no deadlines.
+<!-- end -->
+<!-- when: endDate -->
+- The README countdown is refreshed whenever git-sync runs.
+<!-- end -->
+
+## 1. Triage inbox
+
+<!-- when: triage -->
+1. Run `board triage`. It lists Triage items (oldest first) and items labeled `stale`.
+<!-- end -->
+<!-- when: !triage -->
+1. Run `board triage`. It lists __INBOX__ items that have no priority yet (oldest first)<!-- stale -->, plus items labeled `stale`<!-- /stale -->.
+<!-- end -->
+2. For each item, read the issue (`gh issue view N -R repo`). Propose a type, a priority<!-- estimate -->, and an estimate<!-- /estimate -->, then ask the user. Decide one item at a time unless the user wants a batch.
+3. Apply the decision:
+<!-- when: estimate -->
+   - Accept: `board set REF priority=High estimate=3` and then `board accept REF Todo` (or the default, `Backlog`). Add the type label with `gh issue edit N -R repo --add-label bug` if it is missing.
+<!-- end -->
+<!-- when: !estimate -->
+   - Accept: `board set REF priority=High`. Add the type label with `gh issue edit N -R repo --add-label bug` if it is missing.
+<!-- end -->
+<!-- when: canceled -->
+   - Decline: `board decline REF "reason"`. This sets Canceled and closes the issue as not planned.
+   - Duplicate: `board duplicate REF ORIGINAL_REF`.
+<!-- end -->
+<!-- when: !canceled -->
+   - Decline: `board decline REF "reason"`. This closes the issue as not planned.
+   - Duplicate: `board duplicate REF ORIGINAL_REF`.
+<!-- end -->
+<!-- when: stale -->
+   - A stale item that is still relevant: `board accept REF Backlog` (this removes `stale`). Otherwise, decline it.
+<!-- end -->
+4. End with a summary: how many accepted, declined, and marked duplicate.
+
+## 2. Create an issue, Linear-style
+
+<!-- when: timeboxed -->
+Ask only for the values that are missing. Use the defaults: type from context, priority "No priority", no estimate, no cycle.
+
+```
+board create --repo REPO --title "..." --body "..." --type __TYPES__ \
+  --priority High --estimate 3 --cycle @current --due 2026-12-01 --parent '#4' --assignee @me
+```
+
+Leave out the flags for fields the board does not have (see `board profile`). Status defaults to Todo when a cycle is set, else <!-- backlog -->Backlog<!-- /backlog --><!-- !backlog -->Todo<!-- /!backlog -->. Use `--status __INBOX__` to send the issue to the inbox.
+<!-- end -->
+<!-- when: self-paced -->
+Ask only for the values that are missing. Use the defaults: type from context, priority "No priority". There are no cycles<!-- !dueDate --> and no due dates<!-- /!dueDate -->.
+
+```
+board create --repo REPO --title "..." --body "..." --type __TYPES__ --priority High \
+  [--estimate 3] [--due 2026-12-01] [--parent '#4'] [--assignee @me] [--status Todo]
+```
+
+Use only the flags for fields the board has (see `board profile`). Status defaults to <!-- backlog -->Backlog (Later)<!-- /backlog --><!-- !backlog -->Todo<!-- /!backlog -->. Use `--status Todo` for Next.
+<!-- end -->
+<!-- when: projects -->
+`--parent` makes the new issue a sub-issue of a project issue.
+<!-- end -->
+Report the URL.
+
+<!-- when: cycle -->
+## 3. Cycle planning and review
+
+- Plan: `board plan --cycle @next` shows scope against the average velocity of the last 3 cycles (points completed), plus unscheduled Todo and Backlog candidates by priority. Propose a scope that fits capacity. After the user agrees, schedule each item: `board set REF cycle=@next`. If the cycle is over capacity, say which low-priority items to drop.
+- Review: `board review --cycle @last` (or a title). It shows completed, canceled, still open, rolled over, and scope added after the cycle start. Summarize it in a few lines and point out patterns (for example, repeated rollovers or large unestimated items).
+- List cycles: `board cycles`.
+<!-- when: !cycle-rollover -->
+- This board has no rollover Action. When a cycle ends, run `board rollover` to move unfinished items into the current cycle.
+<!-- end -->
+<!-- end -->
+<!-- when: self-paced -->
+## 3. What's next
+
+Run `board next` (or `board next --limit 10`). It shows:
+
+- **Now**: items In Progress<!-- review --> or In Review<!-- /review -->, and the WIP count against the limit of __WIP__.
+- **Next**: open Todo<!-- backlog --> and Backlog<!-- /backlog --> items, ordered by priority (Urgent first), then by age (oldest first).
+
+Suggest the top item. When the user starts it, run `board set REF status="In Progress"`. If the board is over the WIP limit, the command prints a warning: tell the user and suggest finishing or pausing something first. Do not refuse to start the item.
+
+To see what got done, run `board digest --dry-run`.
+<!-- end -->
+<!-- when: projects -->
+
+## 4. Projects
+
+- Create: `board project-create --repo REPO --title "..." --lead LOGIN<!-- targetDate --> --target 2026-12-15<!-- /targetDate --><!-- health --> --health "On track"<!-- /health -->`.
+- Add work: `board project-add PROJECT_REF CHILD_REF`, or create the child with `board create --parent`.
+<!-- when: health -->
+- Review: `board projects` shows the lead, target, health, and sub-issue progress.
+- Update health: `board set PROJECT_REF health="At risk" target=2027-01-10`.
+- Post a project status update (this shows on the board's status panel): `board status-update --status ON_TRACK|AT_RISK|OFF_TRACK|COMPLETE --body "..."`. Write the body from `projects`, `overdue`, and the current cycle. To get a draft of the automatic digest, run `board digest --dry-run`.
+<!-- end -->
+<!-- when: !health -->
+- Review: `board projects` shows the lead and sub-issue progress. Progress is the only signal: there is no health or target date.
+- Post a project status update (this shows on the board's status panel): `board status-update --body "..."`. Write it as a log of what got done (`board digest --dry-run` gives a draft). Do not add at-risk or deadline language.
+<!-- end -->
+<!-- end -->
+<!-- when: timeboxed full,solo -->
+
+## 5. Overdue and SLA
+
+Run `board overdue`. For each item, suggest an action: reschedule (`board set REF due=...`), raise the priority, reassign, or decline. Ask before you change anything.
+<!-- end -->
+<!-- when: endDate -->
+
+## Countdown
+
+Run `board readme` to refresh the "N days left" line in the project README.
+<!-- end -->
+
+## Label sync
+
+Run `board labels-sync`. It creates or updates this board's labels (__LABELS__) in every linked repo. To add a label everywhere, add it to `labels` in `.github/linear-board.json` in each repo, then run the sync.
+
+<!-- when: hackathon,solo,self-paced -->
+## Upgrade the board
+
+Upgrades only add Status options, fields, views, labels, workflows, and issue forms. They never delete anything (views from the old setup stay). Allowed: preset hackathon -> solo -> full, and pace self-paced -> timeboxed.
+
+1. Ask the user which upgrade they want, and for Timeboxed, the cycle length in days and the start (a date or a weekday).
+2. Run, for example: `board upgrade --preset solo` or `board upgrade --pace timeboxed --cycle-days 14 --cycle-start monday`. Add `--wip N` to change the WIP limit.
+3. It updates `.github/linear-board.json`, the board, the labels, `.github/workflows`, `.github/ISSUE_TEMPLATE`, and this skill. Show `git status`, then ask before you commit and push. Scheduled workflows run only from the default branch.
+4. Give the user the manual steps that the command prints (built-in workflow inbox status, settings for the new views, other linked repos).
+<!-- end -->
+
+## Rules
+
+- Ask before you close, decline, or bulk-edit issues.
+- Use the CLI for writes. For something the CLI does not cover, use `gh api graphql` with the IDs from config.json.
+- Item JSON for custom queries: `board items --status Todo | jq ...`.

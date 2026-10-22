@@ -1,0 +1,29 @@
+# Installed by github-projects-setup (primary repo only). Posts a native
+# project status update. Timeboxed: completed, in progress, rolled over, at-risk
+# projects, overdue. Self-paced: a "what got done" log with no status.
+name: "board: weekly-digest"
+
+on:
+  schedule:
+    - cron: "0 16 * * 5"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the digest without posting it"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - run: bash .github/linear-board/board.sh digest ${DRY_RUN:+--dry-run}
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run == true && 'yes' || '' }}

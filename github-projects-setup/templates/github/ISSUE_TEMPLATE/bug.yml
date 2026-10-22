@@ -1,0 +1,22 @@
+name: Bug
+description: Something is broken or behaves incorrectly.
+labels: [bug]
+projects: ["__PROJECT__"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. ...\n2. ...\n3. ..."
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Version, environment, logs, screenshots.
