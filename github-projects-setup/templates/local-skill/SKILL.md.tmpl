@@ -224,7 +224,10 @@ Run `board labels-sync`. It creates or updates this board's labels (__LABELS__) 
 Upgrades only add Status options, fields, views, labels, workflows, and issue forms. They never delete anything (views from the old setup stay). Allowed: preset hackathon -> solo -> full, and pace self-paced -> timeboxed.
 
 1. Ask the user which upgrade they want, and for Timeboxed, the cycle length in days and the start (a date or a weekday).
-2. Run, for example: `board upgrade --preset solo` or `board upgrade --pace timeboxed --cycle-days 14 --cycle-start monday`. Add `--wip N` to change the WIP limit.
+<!-- when: self-paced wip -->
+   For Timeboxed, also ask whether to keep the WIP limit of __WIP__, change it to a new number, or remove it. Timeboxed boards do not need one. The command fails without this answer.
+<!-- end -->
+2. Run, for example: `board upgrade --preset solo` or `board upgrade --pace timeboxed --cycle-days 14 --cycle-start monday`. Use `--wip N` for a new WIP limit, `--wip keep` to keep it, or `--wip none` to remove it.
 3. It updates `.github/linear-board.json`, the board, the labels, `.github/workflows`, `.github/ISSUE_TEMPLATE`, and this skill. Show `git status`, then ask before you commit and push. Scheduled workflows run only from the default branch.
 4. Give the user the manual steps that the command prints (built-in workflow inbox status, settings for the new views, other linked repos).
 <!-- end -->

@@ -116,5 +116,5 @@ Run this only when the user agrees. Use a test issue that can be deleted.
 - Upgrades only add. Downgrades (Full -> Solo, Timeboxed -> Self-paced) are not supported. Boards set up before pace and presets existed have no catalog in their config, so `board.sh upgrade` refuses them.
 - An upgrade changes files only in the primary repo checkout. For other linked repos, copy `.github/linear-board.json` into each repo and run `board.sh sync-files` there.
 - The Hackathon countdown refreshes only when git-sync runs or someone runs `board.sh readme`, because Hackathon has no scheduled Actions.
-- A WIP limit set while Self-paced stays on after an upgrade to Timeboxed, so git-sync still warns. To turn it off, remove `wipLimit` from `.github/linear-board.json`.
+- An upgrade from Self-paced to Timeboxed on a board with a WIP limit asks the user to keep the limit, change it, or remove it. Without a TTY it fails until it gets `--wip keep`, `--wip N`, or `--wip none`, so the agent asks the user and passes the answer. `--wip none` removes `wipLimit` from `.github/linear-board.json` and re-renders the local skill, so git-sync and the local skill stop warning.
 - Scheduled workflows that use `PROJECT_TOKEN` stop working when the token expires. Tell the user the token's expiry date and suggest a calendar reminder.

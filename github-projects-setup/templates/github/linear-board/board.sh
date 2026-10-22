@@ -60,8 +60,9 @@ Setup and upgrades (add-only: nothing is ever deleted)
                                     Add missing Status options, fields, and views
   sync-files [--dir D] [--primary]  Install enabled workflows and issue forms; render the local skill
   render FILE                       Render a template (<!-- when: ... --> blocks, __PLACEHOLDERS__)
-  upgrade [--preset solo|full] [--pace timeboxed] [--cycle-days N --cycle-start S] [--wip N]
-                                    Hackathon -> Solo -> Full, Self-paced -> Timeboxed
+  upgrade [--preset solo|full] [--pace timeboxed] [--cycle-days N --cycle-start S]
+          [--wip N|keep|none]       Hackathon -> Solo -> Full, Self-paced -> Timeboxed. Self-paced ->
+                                    Timeboxed with a WIP limit asks (or needs --wip without a TTY)
 
 Refs: owner/repo#12, repo#12, #12 or 12 (defaults to $GITHUB_REPOSITORY or the primary repo).
 EOF
@@ -1271,21 +1272,36 @@ cmd_upgrade() {
     die "upgrade: preset can only go hackathon -> solo -> full (now $(preset), asked $to_preset)"
   jq -en --arg a "$(pace)" --arg b "$to_pace" --argjson o "$PACES" '($o | index($b)) != null and ($o | index($b)) >= ($o | index($a))' >/dev/null ||
     die "upgrade: pace can only go self-paced -> timeboxed (now $(pace), asked $to_pace)"
-  [[ -z $wip || $wip =~ ^[0-9]+$ ]] || die "upgrade: --wip must be a number"
+  [[ -z $wip || $wip == keep || $wip == none || ($wip =~ ^[0-9]+$ && $wip -ge 1) ]] ||
+    die "upgrade: --wip must be a positive number, keep, or none"
+  local new_cycle=false
   if [[ $to_pace == timeboxed && -z $(cfg '.cycle.durationDays // empty') ]]; then
     [[ -n $days && -n $start ]] || die "upgrade: Timeboxed needs --cycle-days N and --cycle-start YYYY-MM-DD|WEEKDAY"
     [[ $days =~ ^[0-9]+$ && $days -ge 1 ]] || die "upgrade: --cycle-days must be a positive integer"
-    write_config --argjson d "$days" --arg s "$(resolve_start "$start")" '.cycle = {durationDays: $d, startDate: $s}'
+    start=$(resolve_start "$start"); new_cycle=true
   fi
+  [[ $wip != none || $to_pace != self-paced ]] || die "upgrade: Self-paced needs a WIP limit, so --wip none is only for Timeboxed"
+  # Self-paced -> Timeboxed with a WIP limit: the user decides whether the limit stays.
+  if [[ -z $wip && $(pace) == self-paced && $to_pace == timeboxed && -n $(wip_limit) ]]; then
+    local how
+    how="Pass --wip keep (keep $(wip_limit)), --wip N (a new limit), or --wip none (remove it)."
+    [[ -t 0 ]] || die "upgrade: this board has a WIP limit of $(wip_limit). Timeboxed boards do not need one. $how"
+    read -rp "This board has a WIP limit of $(wip_limit). Keep it, change it, or remove it? [keep/N/none]: " wip
+    [[ $wip == keep || $wip == none || ($wip =~ ^[0-9]+$ && $wip -ge 1) ]] || die "upgrade: unknown answer '$wip'. $how"
+  fi
+  [[ $new_cycle == false ]] ||
+    write_config --argjson d "$days" --arg s "$start" '.cycle = {durationDays: $d, startDate: $s}'
   local before
-  before=$(jq -c '{views: (.views // []), workflows: [.workflows[]?.file], inbox: (.inboxStatus // "Triage")}' "$CONFIG")
+  before=$(jq -c '{views: (.views // []), workflows: [.workflows[]?.file], inbox: (.inboxStatus // "Triage"), wip: .wipLimit}' "$CONFIG")
   write_config --arg p "$to_preset" --arg c "$to_pace" --arg w "$wip" \
-    '.preset = $p | .pace = $c | if $w != "" then .wipLimit = ($w | tonumber) else . end'
+    '.preset = $p | .pace = $c
+     | if $w == "none" then del(.wipLimit) elif $w == "" or $w == "keep" then . else .wipLimit = ($w | tonumber) end'
   "$0" --config "$CONFIG" schema-sync --fields --views
   "$0" --config "$CONFIG" labels-sync
   "$0" --config "$CONFIG" sync-files --dir "$dir" --primary
   jq -r --argjson b "$before" '
     "", "Upgraded to \(.preset), \(.pace). Nothing was deleted.",
+    (if .wipLimit != $b.wip then "WIP limit: \(.wipLimit // "removed") (was \($b.wip // "none"))." else empty end),
     "", "Manual steps:",
     (if .inboxStatus != $b.inbox then "- Built-in workflow \"Item added to project\" (\(.projectUrl)/workflows): set Status to \(.inboxStatus) (was \($b.inbox))." else empty end),
     (.views - $b.views | if length > 0 then "- New views: \(join(", ")). Set grouping and sorting as in the view settings below." else empty end),
