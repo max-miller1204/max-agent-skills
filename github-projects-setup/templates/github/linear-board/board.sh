@@ -19,29 +19,32 @@ usage() {
 Usage: board.sh [--config FILE] <command> [args]
 
 Read
+  profile                           Pace, preset, WIP limit, and what is enabled on this board
   items [--repo R] [--status S]     Board items as JSON (archived items excluded)
   show <ref>                        One item as JSON
-  triage                            Triage inbox plus items labeled stale
+  triage                            Inbox (Triage, or unprioritized inbox items) plus items labeled stale
+  next [--limit 5]                  Now (in progress) and the top open items by priority, then age
   cycles                            Cycle iterations (completed, current, upcoming)
-  projects                          Parent "project" issues with lead, target, health, progress
-  overdue                           Overdue items and SLA breaches
+  projects                          Parent "project" issues with lead, progress (and target, health)
+  overdue                           Overdue items and SLA breaches (Timeboxed)
   plan [--cycle @next]              Capacity check: cycle scope vs recent velocity
   review [--cycle @last]            Cycle review: completed, rolled over, scope change
 
 Write
   set <ref> key=value...            Keys: status priority estimate cycle due target health
-  accept <ref> [Backlog|Todo]       Accept a triage item (default Backlog), clears stale
-  decline <ref> [reason]            Canceled + close as not planned
-  duplicate <ref> <of-ref>          Canceled + close as duplicate of <of-ref>
-  create --title T [--repo R] [--body B] [--type bug|feature|improvement|chore]
+  accept <ref> [Backlog|Todo]       Accept an inbox item (default Backlog, or Todo), clears stale
+  decline <ref> [reason]            Close as not planned (+ Canceled when the board has it)
+  duplicate <ref> <of-ref>          Close as duplicate of <of-ref> (+ Canceled when the board has it)
+  create --title T [--repo R] [--body B] [--type TYPE]
          [--priority P] [--estimate N] [--cycle @current|@next|TITLE] [--due YYYY-MM-DD]
          [--parent REF] [--status S] [--assignee LOGIN]
   project-create --title T [--repo R] [--body B] [--lead LOGIN] [--target YYYY-MM-DD]
          [--health "On track"|"At risk"|"Off track"]
   project-add <parent-ref> <child-ref>   Make child a sub-issue of a project
-  status-update --status ON_TRACK|AT_RISK|OFF_TRACK|COMPLETE|INACTIVE --body B
+  status-update [--status ON_TRACK|AT_RISK|OFF_TRACK|COMPLETE|INACTIVE] --body B
          [--start YYYY-MM-DD] [--target YYYY-MM-DD]
-  labels-sync                       Create or update the standard labels in every linked repo
+  labels-sync                       Create or update the board's labels in every linked repo
+  readme                            Refresh the end-date countdown in the project README
 
 Automation (used by GitHub Actions)
   git-sync                          Branch / PR / issue events -> Status
@@ -50,6 +53,15 @@ Automation (used by GitHub Actions)
   sla [--hours 24] [--repo R]       Label Urgent items with no recent activity sla-breach
   flag-overdue [--repo R]           Label items past their due date overdue (and clear it)
   digest [--dry-run]                Post a weekly project status update
+
+Setup and upgrades (add-only: nothing is ever deleted)
+  resolve                           Recompute the enabled statuses, labels, views, workflows
+  schema-sync [--fields] [--views] [--fresh]
+                                    Add missing Status options, fields, and views
+  sync-files [--dir D] [--primary]  Install enabled workflows and issue forms; render the local skill
+  render FILE                       Render a template (<!-- when: ... --> blocks, __PLACEHOLDERS__)
+  upgrade [--preset solo|full] [--pace timeboxed] [--cycle-days N --cycle-start S] [--wip N]
+                                    Hackathon -> Solo -> Full, Self-paced -> Timeboxed
 
 Refs: owner/repo#12, repo#12, #12 or 12 (defaults to $GITHUB_REPOSITORY or the primary repo).
 EOF
@@ -78,6 +90,27 @@ TODAY=$(date -u +%Y-%m-%d)
 
 field_id() { cfg ".fields.$1.id"; }
 field_name() { cfg ".fields.$1.name"; }
+
+# Write the config in place. It goes through cat, so a symlinked config (the local
+# skill's config.json) stays a symlink.
+write_config() { # JQ_ARGS... (the filter and its --arg options, applied to $CONFIG)
+  local t
+  t=$(mktemp)
+  jq "$@" "$CONFIG" >"$t" && cat "$t" >"$CONFIG"
+  rm -f "$t"
+}
+
+# What this board has. Boards set up before pace and presets existed are Timeboxed + Full.
+pace() { cfg '.pace // "timeboxed"'; }
+preset() { cfg '.preset // "full"'; }
+inbox_status() { cfg '.inboxStatus // "Triage"'; }
+wip_limit() { cfg '.wipLimit // empty'; }
+has_field() { [[ -n $(cfg ".fields.$1.id // empty") ]]; }
+has_status() { jq -e --arg s "$1" '(.fields.status.options // {}) | has($s)' "$CONFIG" >/dev/null; }
+has_label() { jq -e --arg l "$1" '[.labels[].name] | index($l)' "$CONFIG" >/dev/null; }
+behavior() { [[ $(cfg ".behaviors.$1 != false") == true ]]; }
+off() { die "$1 is not enabled on this board ($(preset), $(pace)). See: board.sh upgrade"; }
+need_field() { has_field "$1" || off "the $(jq -r --arg k "$1" '[.catalog.fields[]? | select(.key == $k) | .name][0] // $k' "$CONFIG") field"; }
 
 # option_id FIELD_KEY NAME: case-insensitive lookup of a single-select option ID.
 option_id() {
@@ -135,7 +168,7 @@ ITEM_FIELDS='
 
 # jq program that flattens a raw item node. Expects $f (config .fields) as an argument.
 NORMALIZE='
-  def fv($k): [.fieldValues.nodes[] | select(.field.id? == $f[$k].id)][0];
+  def fv($k): if $f[$k].id then [.fieldValues.nodes[] | select(.field.id? == $f[$k].id)][0] else null end;
   {
     itemId: .id,
     archived: .isArchived,
@@ -265,6 +298,7 @@ set_field() {
     health) key=health ;;
     *) die "unknown field: $key" ;;
   esac
+  need_field "$key"
   if [[ -z $val || $val == none ]]; then clear_value "$item" "$key"; return; fi
   case $key in
     status | priority | health) set_select "$item" "$key" "$val" ;;
@@ -275,6 +309,23 @@ set_field() {
     cycle) set_value "$item" cycle "$(jq -n --arg v "$(resolve_cycle "$val" | jq -r .id)" '{iterationId: $v}')" ;;
     dueDate | targetDate) check_date "$val"; set_value "$item" "$key" "$(jq -n --arg v "$val" '{date: $v}')" ;;
   esac
+}
+
+# WIP limit (set at setup for Self-paced boards). Over the limit only warns, it never blocks.
+wip_count() { # [ITEMS_JSON]
+  if (($#)); then jq "$WIP_FILTER" <<<"$1"; else items_json | jq "$WIP_FILTER"; fi
+}
+WIP_FILTER='[.[] | select(.status == "In Progress" and ((.labels | index("project")) | not))] | length'
+
+# wip_warning [ITEMS_JSON]: prints a warning sentence when In Progress is over the limit.
+wip_warning() {
+  local limit n
+  limit=$(wip_limit)
+  [[ -n $limit ]] || return 0
+  n=$(wip_count "$@")
+  if ((n > limit)); then
+    echo "WIP limit exceeded: $n items are In Progress (limit $limit). Finish or pause something before starting more."
+  fi
 }
 
 add_label() { gh issue edit "$2" -R "$1" --add-label "$3" >/dev/null; }
@@ -356,37 +407,95 @@ cmd_items() {
 cmd_show() { item_json "$(ensure_item "$1")"; }
 
 cmd_triage() {
-  local all
-  all=$(items_json)
-  echo "## Triage"
-  jq 'map(select(.status == "Triage" or (.status == null and .state == "OPEN"))) | sort_by(.createdAt)' <<<"$all" | fmt_items
+  local all inbox
+  all=$(items_json); inbox=$(inbox_status)
+  if [[ $inbox == Triage ]]; then
+    echo "## Triage"
+    jq 'map(select(.status == "Triage" or (.status == null and .state == "OPEN"))) | sort_by(.createdAt)' <<<"$all" | fmt_items
+  else
+    # No Triage status: new issues land in the inbox status; "untriaged" means no Priority yet.
+    echo "## Inbox ($inbox, no priority yet)"
+    jq --arg s "$inbox" "map(select((.status == \$s or .status == null) and .priority == null and $ACTIVE
+      and ((.labels | index(\"project\")) | not))) | sort_by(.createdAt)" <<<"$all" | fmt_items
+  fi
+  if has_label stale; then
+    echo
+    echo "## Stale (Backlog, untouched $(cfg .settings.staleDays)+ days)"
+    jq "map(select((.labels | index(\"stale\")) and $ACTIVE))" <<<"$all" | fmt_items
+  fi
+}
+
+# Priority rank for sort_by: Urgent first, no priority last.
+PRIORITY_RANK='(.priority as $p | ($order | index($p // "No priority")) // 99)'
+
+cmd_next() {
+  local limit=5
+  while (($#)); do case $1 in --limit) limit=$2; shift 2 ;; *) die "next: unknown arg $1" ;; esac; done
+  local items order w
+  items=$(items_json)
+  order=$(cfg '.fields.priority.options | keys_unsorted')
+  echo "## Now (In Progress, In Review)"
+  jq '[.[] | select(.status == "In Progress" or .status == "In Review")] | sort_by(.statusSetAt)' <<<"$items" | fmt_items
+  if [[ -n $(wip_limit) ]]; then
+    echo "WIP: $(wip_count "$items") of $(wip_limit) In Progress"
+    w=$(wip_warning "$items")
+    [[ -z $w ]] || echo "warning: $w"
+  fi
   echo
-  echo "## Stale (Backlog, untouched $(cfg .settings.staleDays)+ days)"
-  jq "map(select((.labels | index(\"stale\")) and $ACTIVE))" <<<"$all" | fmt_items
+  echo "## Next (by priority, then age)"
+  jq --argjson order "$order" --argjson n "$limit" \
+    "[.[] | select((.status == \"Todo\" or .status == \"Backlog\") and $ACTIVE and ((.labels | index(\"project\")) | not))]
+     | sort_by($PRIORITY_RANK, .createdAt) | .[:\$n]" <<<"$items" | fmt_items
+}
+
+cmd_profile() {
+  jq -r '
+    "Pace: \(.pace // "timeboxed")",
+    "Preset: \(.preset // "full")",
+    "WIP limit: \(.wipLimit // "none")",
+    (if .endDate then "End date: \(.endDate)" else empty end),
+    "Inbox status: \(.inboxStatus // "Triage")",
+    "Statuses: \(.fields.status.options | keys_unsorted | join(", "))",
+    "Fields: \([.fields[] | .name] | join(", "))",
+    "Labels: \([.labels[].name] | join(", "))",
+    "Issue types: \(.issueTypes | join(", "))",
+    (if .views then "Views: \(.views | join(", "))" else empty end),
+    (if .workflows then "Workflows: \([.workflows[] | .file + (if .primary then " (primary)" else "" end)] | join(", "))" else empty end),
+    "Assign on branch: \(.behaviors.assignOnBranch != false)"' "$CONFIG"
 }
 
 cmd_cycles() {
+  need_field cycle
   iterations_json | jq -r '
     (.completedIterations[] | "done     \(.title)  \(.startDate) -> \(.endDate)"),
     (.iterations[] | "\(if .startDate <= (now|strftime("%Y-%m-%d")) then "current " else "upcoming" end) \(.title)  \(.startDate) -> \(.endDate)")'
 }
 
 cmd_projects() {
-  items_json | jq -r 'map(select(.labels | index("project"))) | sort_by(.targetDate // "9999") | .[] |
-    [.ref, (.status // "-"), (.health // "-"), (.targetDate // "-"),
-     ((.assignees | join(",")) | if . == "" then "no lead" else . end),
+  has_label project || off "Projects"
+  # Self-paced boards have no Health or Target date: progress is the sub-issue rollup only.
+  items_json | jq -r --argjson h "$(has_field health && echo true || echo false)" \
+    --argjson t "$(has_field targetDate && echo true || echo false)" '
+    map(select(.labels | index("project"))) | sort_by(.targetDate // "9999", .createdAt) | .[] |
+    [.ref, (.status // "-")] + (if $h then [.health // "-"] else [] end) + (if $t then [.targetDate // "-"] else [] end) +
+    [((.assignees | join(",")) | if . == "" then "no lead" else . end),
      (if .subIssues.total > 0 then "\(.subIssues.completed)/\(.subIssues.total) (\(.subIssues.percentCompleted)%)" else "0 sub-issues" end),
      .title] | @tsv' | column -t -s $'\t'
 }
 
 cmd_overdue() {
+  [[ $(pace) == timeboxed ]] || off "Overdue and SLA tracking"
   local all
   all=$(items_json)
-  echo "## Overdue (due before $TODAY)"
-  jq --arg t "$TODAY" "map(select(.dueDate != null and .dueDate < \$t and $ACTIVE)) | sort_by(.dueDate)" <<<"$all" | fmt_items
-  echo
-  echo "## SLA breach (Urgent, no activity $(cfg .settings.slaHours)h+)"
-  jq "map(select((.labels | index(\"sla-breach\")) and $ACTIVE))" <<<"$all" | fmt_items
+  if has_field dueDate; then
+    echo "## Overdue (due before $TODAY)"
+    jq --arg t "$TODAY" "map(select(.dueDate != null and .dueDate < \$t and $ACTIVE)) | sort_by(.dueDate)" <<<"$all" | fmt_items
+    echo
+  fi
+  if has_label sla-breach; then
+    echo "## SLA breach (Urgent, no activity $(cfg .settings.slaHours)h+)"
+    jq "map(select((.labels | index(\"sla-breach\")) and $ACTIVE))" <<<"$all" | fmt_items
+  fi
 }
 
 # velocity_json ITEMS_JSON ITERATIONS_JSON -> {cycles: [{title, points}], average}
@@ -400,6 +509,7 @@ velocity_json() {
 cmd_plan() {
   local which=@next
   while (($#)); do case $1 in --cycle) which=$2; shift 2 ;; *) die "plan: unknown arg $1" ;; esac; done
+  need_field cycle
   local it items cyc vel
   it=$(iterations_json); items=$(items_json); cyc=$(resolve_cycle "$which")
   vel=$(velocity_json "$items" "$it")
@@ -427,6 +537,7 @@ cmd_plan() {
 cmd_review() {
   local which=@last
   while (($#)); do case $1 in --cycle) which=$2; shift 2 ;; *) die "review: unknown arg $1" ;; esac; done
+  need_field cycle
   local it items cyc
   it=$(iterations_json); items=$(items_json); cyc=$(resolve_cycle "$which")
   jq -rn --argjson items "$items" --argjson c "$cyc" --argjson it "$it" '
@@ -457,15 +568,21 @@ cmd_set() {
   (($#)) || die "set: give key=value pairs"
   local item
   item=$(ensure_item "$ref")
+  local started=false w
   for kv in "$@"; do
     [[ $kv == *=* ]] || die "set: expected key=value, got $kv"
     set_field "$item" "${kv%%=*}" "${kv#*=}"
+    [[ ${kv%%=*} != status || $(tr '[:upper:]' '[:lower:]' <<<"${kv#*=}") != "in progress" ]] || started=true
   done
   item_json "$item" | jq -c '{ref, status, priority, estimate, cycle: .cycle.title, dueDate, targetDate, health}'
+  if [[ $started == true ]]; then w=$(wip_warning); [[ -z $w ]] || log "warning: $w"; fi
 }
 
+# Status for accepted or new unscheduled work: Backlog, or Todo on boards without Backlog.
+backlog_status() { if has_status Backlog; then echo Backlog; else echo Todo; fi; }
+
 cmd_accept() {
-  local ref=$1 to=${2:-Backlog} item
+  local ref=$1 to=${2:-$(backlog_status)} item
   parse_ref "$ref"
   item=$(ensure_item "$ref")
   set_select "$item" status "$to"
@@ -496,8 +613,12 @@ cmd_decline() {
   [[ -z $reason ]] || gh issue comment "$REF_NUM" -R "$REF_REPO" --body "Declined: $reason" >/dev/null
   cid=$(content_json "$REF_REPO" "$REF_NUM" | jq -r .id)
   close_issue "$cid" NOT_PLANNED
-  cancel_after_close "$item"
-  echo "declined $REF_REPO#$REF_NUM (Canceled, closed as not planned)"
+  if has_status Canceled; then
+    cancel_after_close "$item"
+    echo "declined $REF_REPO#$REF_NUM (Canceled, closed as not planned)"
+  else
+    echo "declined $REF_REPO#$REF_NUM (closed as not planned)"
+  fi
 }
 
 cmd_duplicate() {
@@ -508,8 +629,8 @@ cmd_duplicate() {
   item=$(ensure_item "$ref")
   cid=$(content_json "$REF_REPO" "$REF_NUM" | jq -r .id)
   close_issue "$cid" DUPLICATE "$oid"
-  cancel_after_close "$item"
-  echo "$REF_REPO#$REF_NUM closed as duplicate of $orepo#$onum (Canceled)"
+  has_status Canceled && cancel_after_close "$item"
+  echo "$REF_REPO#$REF_NUM closed as duplicate of $orepo#$onum$(has_status Canceled && echo " (Canceled)")"
 }
 
 add_sub_issue() { # PARENT_REF CHILD_REF
@@ -536,7 +657,14 @@ cmd_create() {
   [[ $repo == */* ]] || repo=$OWNER/$repo
   [[ -z $type ]] || jq -e --arg t "$type" '.issueTypes | index($t)' "$CONFIG" >/dev/null ||
     die "create: --type must be one of $(cfg '.issueTypes | join(", ")')"
-  [[ -n $status ]] || if [[ -n $cycle ]]; then status=Todo; else status=Backlog; fi
+  # Check every field before the issue exists, so a field this board lacks does not leave a half-made issue.
+  [[ -z $priority ]] || need_field priority
+  [[ -z $estimate ]] || need_field estimate
+  [[ -z $cycle ]] || need_field cycle
+  [[ -z $due ]] || need_field dueDate
+  [[ -z $parent ]] || has_label project || off "Projects"
+  [[ -n $status ]] || if [[ -n $cycle ]]; then status=Todo; else status=$(backlog_status); fi
+  [[ -z $status ]] || option_id status "$status" >/dev/null
   local args=(-R "$repo" --title "$title" --body "$body")
   [[ -z $type ]] || args+=(--label "$type")
   [[ -z $assignee ]] || args+=(--assignee "$assignee")
@@ -566,6 +694,9 @@ cmd_project_create() {
     shift 2
   done
   [[ -n $title ]] || die "project-create: --title is required"
+  has_label project || off "Projects"
+  [[ -z $target ]] || need_field targetDate
+  [[ -z $health ]] || need_field health
   [[ $repo == */* ]] || repo=$OWNER/$repo
   local args=(-R "$repo" --title "$title" --body "$body" --label project)
   [[ -z $lead ]] || args+=(--assignee "$lead")
@@ -573,7 +704,7 @@ cmd_project_create() {
   url=$(gh issue create "${args[@]}")
   num=${url##*/}
   item=$(ensure_item "$repo#$num")
-  set_field "$item" status Backlog
+  set_field "$item" status "$(backlog_status)"
   [[ -z $target ]] || set_field "$item" targetDate "$target"
   [[ -z $health ]] || set_field "$item" health "$health"
   echo "$url"
@@ -587,11 +718,11 @@ cmd_status_update() {
     case $1 in --status) status=$2 ;; --body) body=$2 ;; --start) start=$2 ;; --target) target=$2 ;; *) die "status-update: unknown arg $1" ;; esac
     shift 2
   done
-  [[ -n $status && -n $body ]] || die "status-update: --status and --body are required"
+  [[ -n $body ]] || die "status-update: --body is required"
   gql 'mutation($p: ID!, $s: ProjectV2StatusUpdateStatus, $b: String, $sd: Date, $td: Date) {
       createProjectV2StatusUpdate(input: {projectId: $p, status: $s, body: $b, startDate: $sd, targetDate: $td}) { statusUpdate { id } } }' \
     "$(jq -n --arg p "$PROJECT_ID" --arg s "$status" --arg b "$body" --arg sd "$start" --arg td "$target" \
-      '{p: $p, s: $s, b: $b, sd: (if $sd == "" then null else $sd end), td: (if $td == "" then null else $td end)}')" |
+      '{p: $p, s: (if $s == "" then null else $s end), b: $b, sd: (if $sd == "" then null else $sd end), td: (if $td == "" then null else $td end)}')" |
     jq -r '"status update posted: \(.data.createProjectV2StatusUpdate.statusUpdate.id)"'
 }
 
@@ -611,12 +742,15 @@ cmd_labels_sync() {
 STATUS_ORDER='["Triage","Backlog","Todo","In Progress","In Review","Done","Canceled"]'
 
 # advance ITEM TARGET_STATUS: only moves forward through the workflow; Done and Canceled never regress.
+# Sets ADVANCED=true when it moved the item.
 advance() {
   local item=$1 target=$2 cur
+  ADVANCED=false
   cur=$(item_json "$item" | jq -r '.status // ""')
   if jq -en --arg c "$cur" --arg t "$target" --argjson o "$STATUS_ORDER" \
     '($o | index($c)) as $ci | ($o | index($t)) as $ti | $ci == null or ($ci < $ti and $c != "Done" and $c != "Canceled")' >/dev/null; then
     set_select "$item" status "$target"
+    ADVANCED=true
     log "$REF_REPO#$REF_NUM: ${cur:-<none>} -> $target"
   else
     log "$REF_REPO#$REF_NUM: stays $cur (not moving back to $target)"
@@ -630,7 +764,22 @@ branch_issue_number() { # 12-fix-login, feature/12-fix-login, 12_fix -> 12
 
 in_board_repo() { jq -e --arg r "$1" '.repos | index($r)' "$CONFIG" >/dev/null; }
 
+# After an issue moves to In Progress: comment on it when the board is over its WIP limit.
+wip_comment() { # REPO NUM
+  local w
+  w=$(wip_warning)
+  [[ -n $w ]] || return 0
+  gh issue comment "$2" -R "$1" --body "Heads up: $w" >/dev/null
+  log "$1#$2: $w"
+}
+
 cmd_git_sync() {
+  git_sync_event
+  # Hackathon boards with an end date: refresh the README countdown on every run (there is no schedule).
+  if [[ -n $(cfg '.endDate // empty') ]]; then cmd_readme || log "README countdown not updated"; fi
+}
+
+git_sync_event() {
   local ev=${GITHUB_EVENT_NAME:?} path=${GITHUB_EVENT_PATH:?} repo=${GITHUB_REPOSITORY:?}
   case $ev in
     create)
@@ -642,7 +791,10 @@ cmd_git_sync() {
       parse_ref "$repo#$num"
       item=$(ensure_item "$repo#$num")
       advance "$item" "In Progress"
-      gh issue edit "$num" -R "$repo" --add-assignee "$sender" >/dev/null && log "assigned $sender"
+      [[ $ADVANCED == false ]] || wip_comment "$repo" "$num"
+      if behavior assignOnBranch; then
+        gh issue edit "$num" -R "$repo" --add-assignee "$sender" >/dev/null && log "assigned $sender"
+      fi
       ;;
     pull_request)
       local action draft merged branch prnum refs r target
@@ -658,7 +810,7 @@ cmd_git_sync() {
       [[ -n $refs ]] || { log "PR #$prnum references no issues"; return 0; }
       case $action in
         closed) [[ $merged == true ]] || { log "PR closed without merge"; return 0; }; target=Done ;;
-        *) if [[ $draft == true ]]; then target="In Progress"; else target="In Review"; fi ;;
+        *) if [[ $draft == true ]] || ! has_status "In Review"; then target="In Progress"; else target="In Review"; fi ;;
       esac
       for r in $refs; do
         in_board_repo "${r%%#*}" || continue
@@ -673,6 +825,7 @@ cmd_git_sync() {
           [[ $(jq -r .state <<<"$c") == CLOSED ]] || close_issue "$(jq -r .id <<<"$c")" COMPLETED
         else
           advance "$item" "$target"
+          [[ $ADVANCED == false || $target != "In Progress" ]] || wip_comment "$REF_REPO" "$REF_NUM"
         fi
       done
       ;;
@@ -684,6 +837,7 @@ cmd_git_sync() {
         # Closed as not planned or duplicate (CLI or GitHub UI) -> Canceled, after "Item closed" sets Done.
         case $(jq -r .issue.state_reason "$path") in
           not_planned | duplicate)
+            has_status Canceled || { log "$repo#$num closed as not planned (board has no Canceled)"; return 0; }
             item=$(ensure_item "$repo#$num")
             sleep 10
             set_select "$item" status Canceled; log "$repo#$num -> Canceled" ;;
@@ -695,12 +849,14 @@ cmd_git_sync() {
       item=$(ensure_item "$repo#$num")
       sleep 10 # let whoever created the issue (board skill, issue form) set Status first
       # Empty, or a default from the built-in "Item added to project" workflow (Todo unless
-      # reconfigured), means nobody chose a Status: send it to Triage.
-      local cur
+      # reconfigured), means nobody chose a Status: send it to the inbox (Triage, or Backlog
+      # on Solo boards, or Todo on Hackathon boards).
+      local cur inbox
+      inbox=$(inbox_status)
       cur=$(item_json "$item" | jq -c '{status, by: .statusSetBy}')
       if jq -e '.status == null or .by == "github-project-automation"' <<<"$cur" >/dev/null; then
-        [[ $(jq -r .status <<<"$cur") == Triage ]] || set_select "$item" status Triage
-        log "$repo#$num -> Triage"
+        [[ $(jq -r .status <<<"$cur") == "$inbox" ]] || set_select "$item" status "$inbox"
+        log "$repo#$num -> $inbox"
       else
         log "$repo#$num already has Status $(jq -r .status <<<"$cur") (set by $(jq -r .by <<<"$cur"))"
       fi
@@ -713,7 +869,8 @@ cmd_rollover() {
   if [[ -n ${GITHUB_REPOSITORY:-} && $GITHUB_REPOSITORY != "$PRIMARY_REPO" ]]; then
     log "rollover runs in $PRIMARY_REPO only"; return 0
   fi
-  ensure_future_cycles 3
+  if ! has_field cycle; then log "this board has no cycles ($(pace)), nothing to roll over"; return 0; fi
+  ensure_future_cycles "$(cfg '.settings.upcomingCycles // 3')"
   local it target items movers
   it=$(iterations_json)
   target=$(jq -c '.current // .upcoming[0]' <<<"$it")
@@ -735,6 +892,7 @@ cmd_stale() {
   local days repo=${GITHUB_REPOSITORY:-}
   days=$(cfg .settings.staleDays)
   while (($#)); do case $1 in --days) days=$2; shift 2 ;; --repo) repo=$2; shift 2 ;; *) die "stale: unknown arg $1" ;; esac; done
+  if ! has_label stale; then log "stale flagging is off for this board ($(preset))"; return 0; fi
   local cutoff
   cutoff=$(jq -rn --argjson d "$days" 'now - $d * 86400 | strftime("%Y-%m-%dT%H:%M:%SZ")')
   items_json | jq -c --arg r "$repo" --arg cut "$cutoff" \
@@ -750,6 +908,7 @@ cmd_sla() {
   local hours repo=${GITHUB_REPOSITORY:-}
   hours=$(cfg .settings.slaHours)
   while (($#)); do case $1 in --hours) hours=$2; shift 2 ;; --repo) repo=$2; shift 2 ;; *) die "sla: unknown arg $1" ;; esac; done
+  if ! has_label sla-breach; then log "the Urgent SLA is off for this board ($(preset), $(pace))"; return 0; fi
   local cutoff all
   cutoff=$(jq -rn --argjson h "$hours" 'now - $h * 3600 | strftime("%Y-%m-%dT%H:%M:%SZ")')
   all=$(items_json | jq --arg r "$repo" '[.[] | select(.ref != null and .type == "ISSUE" and ($r == "" or .repo == $r))]')
@@ -776,6 +935,7 @@ cmd_sla() {
 cmd_flag_overdue() {
   local repo=${GITHUB_REPOSITORY:-}
   while (($#)); do case $1 in --repo) repo=$2; shift 2 ;; *) die "flag-overdue: unknown arg $1" ;; esac; done
+  if ! has_label overdue || ! has_field dueDate; then log "overdue flagging is off for this board ($(preset), $(pace))"; return 0; fi
   local all
   all=$(items_json | jq --arg r "$repo" '[.[] | select(.ref != null and ($r == "" or .repo == $r))]')
   jq -c --arg t "$TODAY" ".[] | select(.dueDate != null and .dueDate < \$t and $ACTIVE and ((.labels | index(\"overdue\")) | not))" <<<"$all" |
@@ -797,13 +957,50 @@ cmd_digest() {
     log "digest runs in $PRIMARY_REPO only"; return 0
   fi
   local items it since report
-  items=$(items_json); it=$(iterations_json)
+  items=$(items_json)
   since=$(jq -rn 'now - 7 * 86400 | strftime("%Y-%m-%d")')
+  if [[ $(pace) == self-paced ]]; then
+    report=$(done_log "$items" "$since")
+  else
+    it=$(iterations_json)
+    report=$(timeboxed_digest "$items" "$it" "$since")
+  fi
+  if [[ $dry == true ]]; then
+    jq -r '"status: \(.status // "(none)")\n\n\(.body)"' <<<"$report"
+  else
+    cmd_status_update --status "$(jq -r '.status // ""' <<<"$report")" --body "$(jq -r .body <<<"$report")" --start "$since" --target "$TODAY"
+  fi
+}
+
+DIGEST_DEFS='
+  def line: "- [\(.ref // "draft")](\(.url // "")) \(.title)\(if .priority then " (\(.priority))" else "" end)";
+  def section($h; $xs): "### \($h) (\($xs | length))\n" + (if ($xs | length) == 0 then "None" else ($xs[:25] | map(line) | join("\n")) end);
+  def done_since($since): select(.status == "Done" and (((.closedAt // .statusSetAt) // "")[:10]) >= $since);'
+
+# Self-paced: a plain "what got done" log. No status, no deadlines, no at-risk language.
+done_log() { # ITEMS_JSON SINCE
+  jq -n --argjson items "$1" --arg since "$2" --arg today "$TODAY" "$DIGEST_DEFS"'
+    [$items[] | done_since($since)] as $done
+    | [$items[] | select(.status == "In Progress" or .status == "In Review")] as $now
+    | [$items[] | select((.labels | index("project")) and .status != "Done" and .status != "Canceled" and .state == "OPEN")] as $projects
+    | {
+        status: null,
+        body: ([
+          "What got done, \($since) to \($today).",
+          section("Done"; $done),
+          section("Now"; $now),
+          (if ($projects | length) == 0 then empty else
+            "### Projects\n" + ($projects | map("- [\(.ref)](\(.url)) \(.title): \(.subIssues.completed // 0)/\(.subIssues.total // 0) sub-issues done") | join("\n")) end)
+        ] | join("\n\n"))
+      }'
+}
+
+timeboxed_digest() { # ITEMS_JSON ITERATIONS_JSON SINCE
+  local items=$1 it=$2 since=$3 report
   report=$(jq -n --argjson items "$items" --argjson it "$it" --arg since "$since" --arg today "$TODAY" "
     def active: $ACTIVE;
-    def line: \"- [\(.ref // \"draft\")](\(.url // \"\")) \(.title)\(if .priority then \" (\(.priority))\" else \"\" end)\";
-    def section(\$h; \$xs): \"### \(\$h) (\(\$xs | length))\n\" + (if (\$xs | length) == 0 then \"None\" else (\$xs[:25] | map(line) | join(\"\n\")) end);
-    [\$items[] | select(.status == \"Done\" and (((.closedAt // .statusSetAt) // \"\")[:10]) >= \$since)] as \$done
+    $DIGEST_DEFS
+    [\$items[] | done_since(\$since)] as \$done
     | [\$items[] | select(.status == \"In Progress\" or .status == \"In Review\")] as \$wip
     | [\$items[] | select(\$it.current != null and .cycle.id == \$it.current.id and (.labels | index(\"rolled-over\")) and active)] as \$rolled
     | [\$items[] | select((.labels | index(\"project\")) and active and (.health == \"At risk\" or .health == \"Off track\" or (.targetDate != null and .targetDate < \$today)))] as \$risk
@@ -819,11 +1016,310 @@ cmd_digest() {
           section(\"Overdue\"; \$overdue)
         ] | join(\"\n\n\"))
       }")
-  if [[ $dry == true ]]; then
-    jq -r '"status: \(.status)\n\n\(.body)"' <<<"$report"
-  else
-    cmd_status_update --status "$(jq -r .status <<<"$report")" --body "$(jq -r .body <<<"$report")" --start "$since" --target "$TODAY"
+  echo "$report"
+}
+
+# ---------------------------------------------------------------- setup and upgrades
+#
+# The config's "catalog" (a copy of the setup skill's defaults.json) lists every status,
+# field, label, view, workflow, and issue form, each with the presets, paces, and flags it
+# needs. "resolve" turns catalog + pace + preset into the lists that everything else reads.
+# Setup and upgrades share this code, and both only add: nothing is deleted or renamed.
+
+PRESETS='["hackathon","solo","full"]'
+PACES='["self-paced","timeboxed"]'
+
+RESOLVE='
+  def on($c): (.presets == null or (.presets | index($c.preset)) != null)
+    and (.paces == null or (.paces | index($c.pace)) != null)
+    and ((.flags // []) | all(. as $f | $c.flags[$f] == true));
+  .pace //= "timeboxed" | .preset //= "full" | .catalog as $k
+  | . as $c | .flags = ($k.flagDefaults | with_entries(.key as $n | .value = (($c.flags[$n] // false) or (.value | on($c)))))
+  | . as $c
+  | .statuses = [$k.statuses[] | select(on($c)) | .name]
+  | .inboxStatus = (.statuses as $s | [$k.inboxOrder[] | select(. as $x | $s | index($x))][0])
+  | .labels = [$k.labels[] | select(on($c)) | {name, color, description}]
+  | .issueTypes = [$k.labels[] | select(.type and on($c)) | .name]
+  | .fieldKeys = [$k.fields[] | select(on($c)) | .key]
+  | .views = [$k.views[] | select(on($c)) | .name]
+  | .workflows = [$k.workflows[] | select(on($c)) | {file, primary: (.primary // false)}]
+  | .issueTemplates = [$k.issueTemplates[] | select(on($c)) | .file]
+  | .behaviors = ($k.behaviors | map_values(on($c)))
+  | .estimateScale = $k.estimateScale | .settings = $k.settings'
+
+cmd_resolve() {
+  jq -e .catalog "$CONFIG" >/dev/null || die "config has no catalog (set up before pace and presets existed)"
+  write_config "$RESOLVE"
+}
+
+project_fields_json() {
+  gql 'query($id: ID!) { node(id: $id) { ... on ProjectV2 {
+      fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType }
+        ... on ProjectV2SingleSelectField { options { id name color description } } } }
+      views(first: 50) { nodes { id name number } } } } }' "$(jq -n --arg id "$PROJECT_ID" '{id: $id}')" | jq .data.node
+}
+
+# A weekday cycle start means the most recent such day, today included, so a cycle is active right away.
+resolve_start() { # YYYY-MM-DD|WEEKDAY
+  if [[ $1 =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then echo "$1"; return; fi
+  jq -rn --arg d "$1" '
+    (["sunday","monday","tuesday","wednesday","thursday","friday","saturday"]
+      | map(.[0:3]) | index($d | ascii_downcase | .[0:3])) as $want
+    | if $want == null then error("bad weekday: \($d)") else . end
+    | (now | gmtime) as $t | (($t[6] - $want + 7) % 7) as $back
+    | now - $back * 86400 | strftime("%Y-%m-%d")' || die "cycle start must be YYYY-MM-DD or a weekday name"
+}
+
+create_project_field() { # NAME TYPE [EXTRA_INPUT_JSON]
+  log "creating field $1 ($2)"
+  gql 'mutation($in: CreateProjectV2FieldInput!) { createProjectV2Field(input: $in) { projectV2Field { ... on ProjectV2FieldCommon { id } } } }' \
+    "$(jq -n --arg p "$PROJECT_ID" --arg n "$1" --arg t "$2" --argjson x "${3:-null}" '{in: ({projectId: $p, name: $n, dataType: $t} + $x)}')" >/dev/null
+}
+
+# Status options in catalog order. Existing options keep their ID (so items keep their
+# value) and, unless --fresh, their color and description. Unknown options stay at the end.
+sync_status() { # FRESH(true|false)
+  local p cur opts
+  p=$(project_fields_json)
+  cur=$(jq -c '[.fields.nodes[] | select(.name == "Status")][0]' <<<"$p")
+  opts=$(jq -c --argjson cur "$cur" --argjson fresh "$1" '
+    .pace as $pace | .statuses as $want
+    | [.catalog.statuses[] | select(.name as $n | $want | index($n)) | . as $s
+       | ([$cur.options[] | select(.name == $s.name)][0]) as $have
+       | {name, color, description: (if $pace == "self-paced" then .descriptionSelfPaced // .description else .description end)}
+       | if $have == null then . elif $fresh then . + {id: $have.id} else {id: $have.id, name: $have.name, color: $have.color, description: $have.description} end]
+    | . + [$cur.options[] | select(.name as $n | $want | index($n) | not) | {id, name, color, description}]' "$CONFIG")
+  if [[ $1 == true ]] || jq -e --argjson cur "$cur" 'length != ($cur.options | length)' <<<"$opts" >/dev/null; then
+    log "Status options: $(jq -r 'map(.name) | join(", ")' <<<"$opts")"
+    gql 'mutation($f: ID!, $o: [ProjectV2SingleSelectFieldOptionInput!]!) {
+        updateProjectV2Field(input: {fieldId: $f, singleSelectOptions: $o}) { projectV2Field { ... on ProjectV2SingleSelectField { id } } } }' \
+      "$(jq -n --arg f "$(jq -r .id <<<"$cur")" --argjson o "$opts" '{f: $f, o: $o}')" >/dev/null
   fi
+}
+
+sync_fields() { # FRESH
+  sync_status "$1"
+  local p key name type
+  p=$(project_fields_json)
+  while IFS=$'\t' read -r key name type; do
+    jq -e --arg n "$name" '.fields.nodes[] | select(.name == $n)' <<<"$p" >/dev/null && continue
+    case $type in
+      SINGLE_SELECT) create_project_field "$name" "$type" "$(jq -c --arg k "$key" \
+        '.catalog as $c | {singleSelectOptions: $c[$c.fields[] | select(.key == $k) | .options]}' "$CONFIG")" ;;
+      ITERATION)
+        [[ -n $(cfg '.cycle.durationDays // empty') ]] || die "a Cycle field needs a cycle length and start (--cycle-days, --cycle-start)"
+        write_config --arg s "$(resolve_start "$(cfg .cycle.startDate)")" '.cycle.startDate = $s'
+        create_project_field "$name" "$type" "$(jq -c '.cycle as $c | {iterationConfiguration: {startDate: $c.startDate, duration: $c.durationDays,
+          iterations: [range(0; 4) as $i | {title: "Cycle \($i + 1)", duration: $c.durationDays,
+            startDate: (($c.startDate | strptime("%Y-%m-%d") | mktime) + $i * $c.durationDays * 86400 | strftime("%Y-%m-%d"))}]}}' "$CONFIG")" ;;
+      *) create_project_field "$name" "$type" ;;
+    esac
+  done < <(jq -r '.fieldKeys as $on | .catalog.fields[] | select(.builtin | not) | select(.key as $k | $on | index($k)) | [.key, .name, .dataType] | @tsv' "$CONFIG")
+  # Record every catalog field that is on the board (including ones from an earlier preset).
+  p=$(project_fields_json)
+  write_config --argjson p "$p" '
+    .fields = (reduce .catalog.fields[] as $cf ({};
+        ([$p.fields.nodes[] | select(.name == $cf.name)][0]) as $x
+        | if $x == null then . else . + {($cf.key): ({id: $x.id, name: $x.name}
+            + (if $x.options then {options: ($x.options | map({(.name): .id}) | add)} else {} end))} end))'
+}
+
+sync_views() {
+  local p first name layout filter conf vid
+  p=$(project_fields_json)
+  first=$(jq -r '.views.nodes | sort_by(.number) | .[0] | select(.name == "View 1") | .id // empty' <<<"$p")
+  # Unit separator, not tab: read collapses repeated whitespace separators, and filters can be empty.
+  while IFS=$'\x1f' read -r name layout filter conf; do
+    if jq -e --arg n "$name" '.views.nodes[] | select(.name == $n)' <<<"$p" >/dev/null; then
+      log "view \"$name\" exists, skipping"; continue
+    fi
+    if [[ -n $first ]]; then
+      vid=$first; first=""
+      log "renaming View 1 to \"$name\""
+    else
+      log "creating view \"$name\""
+      vid=$(gql 'mutation($p: ID!, $n: String!, $l: ProjectV2ViewLayout!, $c: ProjectV2ViewConfigurationInput) {
+          createProjectV2View(input: {projectId: $p, name: $n, layout: $l, configuration: $c}) { projectV2View { id } } }' \
+        "$(jq -n --arg p "$PROJECT_ID" --arg n "$name" --arg l "$layout" --argjson c "$conf" '{p: $p, n: $n, l: $l, c: $c}')" |
+        jq -r .data.createProjectV2View.projectV2View.id)
+      conf=null
+    fi
+    gql 'mutation($v: ID!, $n: String, $l: ProjectV2ViewLayout, $f: String, $c: ProjectV2ViewConfigurationInput) {
+        updateProjectV2View(input: {viewId: $v, name: $n, layout: $l, filter: $f, configuration: $c}) { projectV2View { id } } }' \
+      "$(jq -n --arg v "$vid" --arg n "$name" --arg l "$layout" --arg f "$filter" --argjson c "$conf" \
+        '{v: $v, n: $n, l: $l, f: $f, c: $c}')" >/dev/null
+  done < <(jq -r --argjson p "$p" '
+    (.fields.status.options | keys) as $st
+    | .views as $on | .catalog.views[] | select(.name as $n | $on | index($n))
+    | ([.excludeStatuses[]? | select(. as $s | $st | index($s))]) as $ex
+    | ([.filter, (if ($ex | length) > 0 then "-status:" + ($ex | join(",")) else empty end)] | map(select(. != "")) | join(" ")) as $filter
+    | ([.fields[]? as $n | $p.fields.nodes[] | select(.name == $n) | .id]) as $ids
+    | [.name, .layout, $filter, (if ($ids | length) > 0 then ({visibleFieldIds: $ids} | tojson) else "null" end)] | join("\u001f")' "$CONFIG")
+}
+
+cmd_schema_sync() {
+  local fields=false views=false fresh=false
+  while (($#)); do case $1 in --fields) fields=true ;; --views) views=true ;; --fresh) fresh=true ;; *) die "schema-sync: unknown arg $1" ;; esac; shift; done
+  [[ $fields == true || $views == true ]] || { fields=true; views=true; }
+  cmd_resolve
+  [[ $fields == false ]] || sync_fields "$fresh"
+  [[ $views == false ]] || sync_views
+}
+
+# Facts for <!-- when: ... --> blocks: pace, preset, field keys, and feature words.
+facts() {
+  jq -r '[.pace // "timeboxed", .preset // "full", (.fields | keys[]),
+    (if .fields.status.options.Triage then "triage" else empty end),
+    (if .fields.status.options.Backlog then "backlog" else empty end),
+    (if .fields.status.options["In Review"] then "review" else empty end),
+    (if .fields.status.options.Canceled then "canceled" else empty end),
+    (.labels[].name | if . == "project" then "projects" elif . == "sla-breach" then "sla" else . end),
+    (if .wipLimit then "wip" else empty end), (if .endDate then "endDate" else empty end),
+    (if .behaviors.assignOnBranch != false then "assign" else empty end),
+    (.workflows[]?.file | sub("^linear-"; "") | sub("\\.yml$"; ""))] | join(" ")' "$CONFIG"
+}
+
+# render FILE: keeps the lines inside <!-- when: A B,C !D --> ... <!-- end --> only when every
+# word is a fact (A and (B or C) and not D), keeps inline <!-- X -->text<!-- /X --> only when
+# X is a fact (X may be !Y or Y,Z), then fills in the __PLACEHOLDERS__.
+cmd_render() {
+  [[ -f ${1:-} ]] || die "render: file not found: ${1:-}"
+  local f
+  f=$(facts)
+  awk -v facts=" $f " '
+    function ok(cond,  n, i, t, x, neg, m, alts, j, any) {
+      n = split(cond, t, " ")
+      for (i = 1; i <= n; i++) {
+        x = t[i]; neg = 0
+        if (substr(x, 1, 1) == "!") { neg = 1; x = substr(x, 2) }
+        m = split(x, alts, ","); any = 0
+        for (j = 1; j <= m; j++) if (index(facts, " " alts[j] " ")) any = 1
+        if (any == neg) return 0
+      }
+      return 1
+    }
+    BEGIN { show = 1; d = 0 }
+    /^[ \t]*<!-- when: .* -->[ \t]*$/ { c = $0; sub(/^[ \t]*<!-- when: /, "", c); sub(/ -->[ \t]*$/, "", c); stack[++d] = show; show = show && ok(c); next }
+    /^[ \t]*<!-- end -->[ \t]*$/ { show = stack[d--]; next }
+    show { print }' "$1" |
+    jq -Rrs --slurpfile c "$CONFIG" --arg facts "$f" '
+      ($facts | split(" ")) as $facts
+      | def fact($x): if ($x | startswith("!")) then (fact($x[1:]) | not) else any($x | split(",")[]; . as $a | $facts | index($a)) end;
+      $c[0] as $c
+      | ($c.catalog.views // [] | map(select(.name as $n | ($c.views // []) | index($n)))) as $views
+      | {
+          SKILL_NAME: "\($c.slug)-board", TITLE: $c.title, PROJECT_URL: $c.projectUrl,
+          PRIMARY_REPO: ($c.primaryRepo // ""), REPOS: ($c.repos | join(", ")),
+          PACE: ($c.pace // "timeboxed"), PRESET: ($c.preset // "full"),
+          INBOX: ($c.inboxStatus // "Triage"), STATUSES: ($c.fields.status.options | keys_unsorted | join(", ")),
+          TYPES: ($c.issueTypes | join("|")), TYPES_LIST: ($c.issueTypes | join(", ")),
+          LABELS: ([$c.labels[].name] | join(", ")),
+          CYCLE_DAYS: ($c.cycle.durationDays // "" | tostring), STALE_DAYS: ($c.settings.staleDays | tostring),
+          SLA_HOURS: ($c.settings.slaHours | tostring), ARCHIVE_DAYS: ($c.settings.archiveDays | tostring),
+          ESTIMATES: ($c.estimateScale | map(tostring) | join(", ")),
+          WIP: ($c.wipLimit // "" | tostring), END_DATE: ($c.endDate // ""),
+          VIEW_SETTINGS: ($views | map("| \(.name) | \(.manual) |") | join("\n")),
+          SECRET_COMMANDS: ($c.repos | map("gh secret set PROJECT_TOKEN -R \(.)") | join("\n"))
+        } as $v
+      | reduce ($v | to_entries[]) as $e (.; gsub("__\($e.key)__"; $e.value))
+      | gsub("<!-- (?<c>!?[A-Za-z][A-Za-z,-]*) -->(?<t>.*?)<!-- /\\k<c> -->"; if fact(.c) then .t else "" end)'
+}
+
+# sync-files: copies the enabled workflows and issue forms from .github/linear-board/templates
+# into .github, without touching files that exist. With --primary, also renders the local skill.
+cmd_sync_files() {
+  local dir="" primary=false
+  while (($#)); do case $1 in --dir) dir=$2; shift 2 ;; --primary) primary=true; shift ;; *) die "sync-files: unknown arg $1" ;; esac; done
+  [[ -n $dir ]] || dir=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  local T=$dir/.github/linear-board/templates G=$dir/.github f added=()
+  [[ -d $T ]] || die "templates not found: $T"
+  mkdir -p "$G/workflows" "$G/ISSUE_TEMPLATE"
+  for f in $(jq -r --argjson p "$primary" '.workflows[] | select($p or (.primary | not)) | .file' "$CONFIG"); do
+    [[ -e $G/workflows/$f ]] && continue
+    cp "$T/workflows/$f" "$G/workflows/$f"; added+=("workflows/$f")
+  done
+  for f in $(cfg '.issueTemplates[]'); do
+    [[ -e $G/ISSUE_TEMPLATE/$f ]] && continue
+    sed "s|__PROJECT__|$OWNER/$(cfg .projectNumber)|" "$T/ISSUE_TEMPLATE/$f" >"$G/ISSUE_TEMPLATE/$f"; added+=("ISSUE_TEMPLATE/$f")
+  done
+  echo "added: ${added[*]:-(nothing new)}"
+  [[ $primary == true ]] || return 0
+  local slug skill
+  slug=$(cfg .slug)-board
+  skill=$dir/.agents/skills/$slug
+  mkdir -p "$skill" "$dir/.claude/skills"
+  cmd_render "$T/local-skill.md.tmpl" >"$skill/SKILL.md"
+  # One config: the skill's config.json links to the repo's .github/linear-board.json.
+  [[ -L $skill/config.json ]] || { rm -f "$skill/config.json"; ln -s ../../../.github/linear-board.json "$skill/config.json"; }
+  ln -sfn "../../.agents/skills/$slug" "$dir/.claude/skills/$slug"
+  echo "local skill: .agents/skills/$slug (linked from .claude/skills/$slug)"
+}
+
+# upgrade: Hackathon -> Solo -> Full and Self-paced -> Timeboxed. Adds, never deletes.
+cmd_upgrade() {
+  local to_preset to_pace days="" start="" wip="" dir=""
+  to_preset=$(preset); to_pace=$(pace)
+  while (($#)); do
+    case $1 in
+      --preset) to_preset=$2 ;; --pace) to_pace=$2 ;; --cycle-days) days=$2 ;; --cycle-start) start=$2 ;;
+      --wip) wip=$2 ;; --dir) dir=$2 ;; *) die "upgrade: unknown arg $1" ;;
+    esac
+    shift 2
+  done
+  [[ -n $dir ]] || dir=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  jq -en --arg a "$(preset)" --arg b "$to_preset" --argjson o "$PRESETS" '($o | index($b)) != null and ($o | index($b)) >= ($o | index($a))' >/dev/null ||
+    die "upgrade: preset can only go hackathon -> solo -> full (now $(preset), asked $to_preset)"
+  jq -en --arg a "$(pace)" --arg b "$to_pace" --argjson o "$PACES" '($o | index($b)) != null and ($o | index($b)) >= ($o | index($a))' >/dev/null ||
+    die "upgrade: pace can only go self-paced -> timeboxed (now $(pace), asked $to_pace)"
+  [[ -z $wip || $wip =~ ^[0-9]+$ ]] || die "upgrade: --wip must be a number"
+  if [[ $to_pace == timeboxed && -z $(cfg '.cycle.durationDays // empty') ]]; then
+    [[ -n $days && -n $start ]] || die "upgrade: Timeboxed needs --cycle-days N and --cycle-start YYYY-MM-DD|WEEKDAY"
+    [[ $days =~ ^[0-9]+$ && $days -ge 1 ]] || die "upgrade: --cycle-days must be a positive integer"
+    write_config --argjson d "$days" --arg s "$(resolve_start "$start")" '.cycle = {durationDays: $d, startDate: $s}'
+  fi
+  local before
+  before=$(jq -c '{views: (.views // []), workflows: [.workflows[]?.file], inbox: (.inboxStatus // "Triage")}' "$CONFIG")
+  write_config --arg p "$to_preset" --arg c "$to_pace" --arg w "$wip" \
+    '.preset = $p | .pace = $c | if $w != "" then .wipLimit = ($w | tonumber) else . end'
+  "$0" --config "$CONFIG" schema-sync --fields --views
+  "$0" --config "$CONFIG" labels-sync
+  "$0" --config "$CONFIG" sync-files --dir "$dir" --primary
+  jq -r --argjson b "$before" '
+    "", "Upgraded to \(.preset), \(.pace). Nothing was deleted.",
+    "", "Manual steps:",
+    (if .inboxStatus != $b.inbox then "- Built-in workflow \"Item added to project\" (\(.projectUrl)/workflows): set Status to \(.inboxStatus) (was \($b.inbox))." else empty end),
+    (.views - $b.views | if length > 0 then "- New views: \(join(", ")). Set grouping and sorting as in the view settings below." else empty end),
+    (([.workflows[].file] - $b.workflows) | if length > 0 then "- New workflows: \(join(", ")). Commit and push them to the default branch (scheduled workflows run only from there)." else empty end),
+    (.repos - [.primaryRepo] | if length > 0 then "- Other linked repos (\(join(", "))): copy .github/linear-board.json into each repo, then run there: bash .github/linear-board/board.sh sync-files" else empty end),
+    "", "View settings (the API cannot set these):", "| View | Set |", "|---|---|"' "$CONFIG"
+  local t
+  t=$(mktemp)
+  echo __VIEW_SETTINGS__ >"$t"
+  cmd_render "$t"
+  rm -f "$t"
+}
+
+# Hackathon end date as a countdown block in the project README (between markers, so the
+# rest of the README is kept).
+cmd_readme() {
+  local end cur block new
+  end=$(cfg '.endDate // empty')
+  [[ -n $end ]] || { log "no end date configured"; return 0; }
+  block=$(jq -rn --arg e "$end" --arg t "$TODAY" '
+    ((($e | strptime("%Y-%m-%d") | mktime) - ($t | strptime("%Y-%m-%d") | mktime)) / 86400 | floor) as $d
+    | "<!-- board:countdown -->\n**"
+      + (if $d > 1 then "Ends \($e): \($d) days left" elif $d == 1 then "Ends \($e): 1 day left"
+         elif $d == 0 then "Ends today (\($e))" else "Ended on \($e)" end)
+      + "**\n<!-- /board:countdown -->"')
+  cur=$(gql 'query($id: ID!) { node(id: $id) { ... on ProjectV2 { readme } } }' "$(jq -n --arg id "$PROJECT_ID" '{id: $id}')" | jq -r '.data.node.readme // ""')
+  new=$(jq -rn --arg c "$cur" --arg b "$block" '
+    if ($c | test("<!-- board:countdown -->[\\s\\S]*<!-- /board:countdown -->"))
+    then $c | sub("<!-- board:countdown -->[\\s\\S]*<!-- /board:countdown -->"; $b)
+    elif $c == "" then $b else $b + "\n\n" + $c end')
+  if [[ $new == "$cur" ]]; then echo "README countdown is current"; return 0; fi
+  gql 'mutation($p: ID!, $r: String!) { updateProjectV2(input: {projectId: $p, readme: $r}) { projectV2 { id } } }' \
+    "$(jq -n --arg p "$PROJECT_ID" --arg r "$new" '{p: $p, r: $r}')" >/dev/null
+  echo "README countdown: $(sed -n 2p <<<"$block" | tr -d '*')"
 }
 
 # ---------------------------------------------------------------- dispatch
@@ -833,7 +1329,9 @@ cmd=${1:-help}
 case $cmd in
   items) cmd_items "$@" ;;
   show) cmd_show "$@" ;;
+  profile) cmd_profile ;;
   triage) cmd_triage ;;
+  next) cmd_next "$@" ;;
   cycles) cmd_cycles ;;
   projects) cmd_projects ;;
   overdue) cmd_overdue ;;
@@ -854,6 +1352,12 @@ case $cmd in
   sla) cmd_sla "$@" ;;
   flag-overdue) cmd_flag_overdue "$@" ;;
   digest) cmd_digest "$@" ;;
+  readme) cmd_readme ;;
+  resolve) cmd_resolve ;;
+  schema-sync) cmd_schema_sync "$@" ;;
+  sync-files) cmd_sync_files "$@" ;;
+  render) cmd_render "$@" ;;
+  upgrade) cmd_upgrade "$@" ;;
   help | -h | --help) usage ;;
   *) usage >&2; exit 2 ;;
 esac

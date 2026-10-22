@@ -8,13 +8,28 @@ Open __PROJECT_URL__/workflows
 
 | Workflow | Setting |
 |---|---|
-| Item added to project | Turn on. When: `issue, pull request`. Set Status: **Triage**. The default is Todo. Until you change it, the `git-sync` Action replaces a Todo that this workflow set with Triage about 10 seconds later. |
+<!-- when: !hackathon -->
+| Item added to project | Turn on. When: `issue, pull request`. Set Status: **__INBOX__**. The default is Todo. Until you change it, the `git-sync` Action replaces a Todo that this workflow set with __INBOX__ about 10 seconds later. |
+<!-- end -->
+<!-- when: hackathon -->
+| Item added to project | Turn on. When: `issue, pull request`. Set Status: **Todo** (this is the default). |
+<!-- end -->
+<!-- when: canceled -->
 | Item closed | Turn on. Set Status: **Done**. This workflow also sets Done on issues closed as not planned or duplicate. The `git-sync` Action and the board CLI change those to **Canceled** afterwards. |
+<!-- end -->
+<!-- when: !canceled -->
+| Item closed | Turn on. Set Status: **Done**. This board has no Canceled status, so issues closed as not planned also end as Done (they stay closed as not planned). |
+<!-- end -->
 | Pull request merged | Turn on. Set Status: **Done**. |
+<!-- when: review -->
 | Pull request linked to issue | Turn off. The `board: git-sync` Action moves linked issues to In Review. |
+<!-- end -->
+<!-- when: !review -->
+| Pull request linked to issue | Turn off. The `board: git-sync` Action moves linked issues to In Progress. |
+<!-- end -->
 | Auto-close issue | Keep on. When Status changes to Done, GitHub closes the issue. |
-| Auto-add to project | Turn on once for each linked repo: __REPOS__. Filter: `is:issue,pr is:open`. Set the repository in the workflow. Free plans allow only 1 auto-add workflow. If you hit that limit, the `git-sync` Action adds new issues from every linked repo and sets them to Triage. |
-| Auto-archive items | Turn on. Filter: `is:issue,pr is:closed updated:<@today-__ARCHIVE_DAYS__d`. Canceled items are closed (as not planned or duplicate), so this filter archives them too. |
+| Auto-add to project | Turn on once for each linked repo: __REPOS__. Filter: `is:issue,pr is:open`. Set the repository in the workflow. Free plans allow only 1 auto-add workflow. If you hit that limit, the `git-sync` Action adds new issues from every linked repo and sets them to __INBOX__. |
+| Auto-archive items | Turn on. Filter: `is:issue,pr is:closed updated:<@today-__ARCHIVE_DAYS__d`. Closed items (Done, and Canceled when the board has it) are archived after __ARCHIVE_DAYS__ days. |
 
 ## 2. View settings
 
@@ -22,18 +37,15 @@ Open each view. Use the view menu (the arrow next to the tab name) or the toolba
 
 | View | Set |
 |---|---|
-| Triage (__PROJECT_URL__/views/1) | Sort by: Created, descending. |
-| Backlog | Group by: Priority. Sort by: Priority. |
-| Active cycle | Column by: Status (this is the default). Swimlanes (optional): Priority. |
-| Upcoming cycle | Column by: Status. |
-| My issues | Sort by: Priority. |
-| All issues | Group by: Status. Sort by: Priority. |
-| Projects | Sort by: Target date. Fields shown: Assignees (the lead), Target date, Health, Sub-issues progress. |
-| Roadmap | Dates: start = (none) or Created, target = **Target date**. Zoom: Quarter. |
-| Cycles | Group by: Cycle. In the Estimate column menu, choose **Sum**. |
-| Overdue / SLA | Sort by: Due date, ascending. To split the two kinds, group by Labels (optional). |
+__VIEW_SETTINGS__
 
 Delete any view tab that you do not need: open the view menu, then **Delete view**.
+<!-- when: endDate -->
+
+## Countdown
+
+The project README shows "Ends __END_DATE__: N days left". There is no scheduled Action, so the `git-sync` Action refreshes it on each run (each branch, PR, or issue event). Run `bash .github/linear-board/board.sh readme` to refresh it by hand.
+<!-- end -->
 
 ## 3. Per-repo Actions secret
 

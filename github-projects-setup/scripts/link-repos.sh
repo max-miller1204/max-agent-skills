@@ -15,6 +15,9 @@ done
 [[ -n $config && -n $primary ]] || die "usage: link-repos.sh --config FILE --primary OWNER/REPO [OWNER/REPO...]"
 load_config "$config"
 [[ " ${repos[*]-} " == *" $primary "* ]] || repos=("$primary" "${repos[@]}")
+if [[ $(jq -r .preset "$config") == solo && ${#repos[@]} -gt 1 ]]; then
+  die "the solo preset uses exactly one repo; got ${repos[*]}"
+fi
 
 for r in "${repos[@]}"; do
   [[ $r == */* ]] || die "repos must be OWNER/REPO: $r"

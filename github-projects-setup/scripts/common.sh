@@ -4,6 +4,8 @@ set -euo pipefail
 
 SKILL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DEFAULTS=$SKILL_DIR/scripts/defaults.json
+# The shared CLI (installed into each repo) owns the schema code, so setup and upgrades match.
+BOARD=$SKILL_DIR/templates/github/linear-board/board.sh
 
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo "==> $*" >&2; }

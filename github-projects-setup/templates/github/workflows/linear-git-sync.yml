@@ -1,7 +1,11 @@
 # Installed by github-projects-setup. Moves board items as work happens:
-# branch "12-fix-login" -> In Progress (and assigns the creator), PR opened or
-# ready -> In Review, PR merged -> Done, new issue with no Status -> Triage,
-# issue closed as not planned or duplicate -> Canceled.
+# branch "12-fix-login" -> In Progress (and assigns the creator, except on Solo
+# boards), PR opened or ready -> In Review (In Progress on boards without it),
+# PR merged -> Done, new issue with no Status -> the inbox (Triage, Backlog, or
+# Todo), issue closed as not planned or duplicate -> Canceled (when the board
+# has it). Also warns on the issue when the board is over its WIP limit and
+# refreshes the Hackathon README countdown. Settings come from
+# .github/linear-board.json.
 name: "board: git-sync"
 
 on:

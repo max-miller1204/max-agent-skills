@@ -1,35 +1,36 @@
 #!/usr/bin/env bash
-# create-fields.sh --project-url URL --cycle-days N --cycle-start YYYY-MM-DD|WEEKDAY --out FILE [--name NAME]
-# Replaces the Status options, creates Priority, Estimate, Cycle, Target date,
-# Due date and Health, then writes the board config (all IDs) to FILE.
+# create-fields.sh --project-url URL --pace timeboxed|self-paced --preset full|solo|hackathon --out FILE
+#   [--name NAME] [--cycle-days N --cycle-start YYYY-MM-DD|WEEKDAY] [--wip N] [--due-date on|off]
+#   [--end-date YYYY-MM-DD]
+# Writes the board config (pace, preset, catalog), then lets board.sh add the Status
+# options and the fields that this pace and preset use, and record their IDs in FILE.
 source "$(dirname "$0")/common.sh"
 
-url="" days="" start="" out="" name=""
+url="" pace="" preset="" out="" name="" days="" start="" wip="" due="" end=""
 while (($#)); do
   case $1 in
-    --project-url) url=$2 ;; --cycle-days) days=$2 ;; --cycle-start) start=$2 ;;
-    --out) out=$2 ;; --name) name=$2 ;;
+    --project-url) url=$2 ;; --pace) pace=$2 ;; --preset) preset=$2 ;; --out) out=$2 ;; --name) name=$2 ;;
+    --cycle-days) days=$2 ;; --cycle-start) start=$2 ;; --wip) wip=$2 ;; --due-date) due=$2 ;; --end-date) end=$2 ;;
     *) die "unknown arg: $1" ;;
   esac
   shift 2
 done
-[[ -n $url && -n $days && -n $start && -n $out ]] || die "usage: create-fields.sh --project-url URL --cycle-days N --cycle-start DATE|WEEKDAY --out FILE [--name NAME]"
-[[ $days =~ ^[0-9]+$ && $days -ge 1 ]] || die "--cycle-days must be a positive integer"
-
-# A weekday means "the most recent such day, today included", so a cycle is active right away.
-if [[ ! $start =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-  start=$(jq -rn --arg d "$start" '
-    (["sunday","monday","tuesday","wednesday","thursday","friday","saturday"]
-      | map(.[0:3]) | index($d | ascii_downcase | .[0:3])) as $want
-    | if $want == null then error("bad weekday: \($d)") else . end
-    | (now | gmtime) as $t | (($t[6] - $want + 7) % 7) as $back
-    | now - $back * 86400 | strftime("%Y-%m-%d")') || die "--cycle-start must be YYYY-MM-DD or a weekday name"
+[[ -n $url && -n $pace && -n $preset && -n $out ]] ||
+  die "usage: create-fields.sh --project-url URL --pace timeboxed|self-paced --preset full|solo|hackathon --out FILE [options]"
+[[ $pace == timeboxed || $pace == self-paced ]] || die "--pace must be timeboxed or self-paced"
+[[ $preset == full || $preset == solo || $preset == hackathon ]] || die "--preset must be full, solo, or hackathon"
+if [[ $pace == timeboxed ]]; then
+  [[ -n $days && -n $start ]] || die "Timeboxed needs --cycle-days and --cycle-start"
+  [[ $days =~ ^[0-9]+$ && $days -ge 1 ]] || die "--cycle-days must be a positive integer"
+else
+  [[ $wip =~ ^[0-9]+$ && $wip -ge 1 ]] || die "Self-paced needs --wip N (the max number of In Progress items)"
 fi
+[[ -z $due || $due == on || $due == off ]] || die "--due-date must be on or off"
+[[ -z $end || $preset == hackathon ]] || die "--end-date is for the hackathon preset"
+[[ -z $end || $end =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "--end-date must be YYYY-MM-DD"
 
 info=$("$SKILL_DIR/scripts/preflight.sh" "$url")
-parse_project_url "$url"
 project_id=$(jq -r .projectId <<<"$info")
-status_id=$(jq -r .statusFieldId <<<"$info")
 title=$(jq -r .title <<<"$info")
 
 if [[ -n $name ]]; then
@@ -39,47 +40,23 @@ if [[ -n $name ]]; then
   title=$name
 fi
 
-log "replacing Status options"
-current=$(project_query 'field(name: "Status") { ... on ProjectV2SingleSelectField { options { id name } } }')
-opts=$(jq -c --argjson cur "$current" '.status | map(. as $o | . + ({id: ($cur.field.options[] | select(.name == $o.name) | .id)} // {}))' "$DEFAULTS")
-gql 'mutation($f: ID!, $o: [ProjectV2SingleSelectFieldOptionInput!]!) {
-    updateProjectV2Field(input: {fieldId: $f, singleSelectOptions: $o}) { projectV2Field { ... on ProjectV2SingleSelectField { id } } } }' \
-  "$(jq -n --arg f "$status_id" --argjson o "$opts" '{f: $f, o: $o}')" >/dev/null
-
-create_field() { # NAME TYPE [EXTRA_INPUT_JSON]
-  log "creating field $1 ($2)"
-  gql 'mutation($in: CreateProjectV2FieldInput!) { createProjectV2Field(input: $in) { projectV2Field { ... on ProjectV2FieldCommon { id } } } }' \
-    "$(jq -n --arg p "$project_id" --arg n "$1" --arg t "$2" --argjson x "${3:-null}" '{in: ({projectId: $p, name: $n, dataType: $t} + $x)}')" >/dev/null
-}
-
-fname() { jq -r ".fieldNames.$1" "$DEFAULTS"; }
-create_field "$(fname priority)" SINGLE_SELECT "$(jq -c '{singleSelectOptions: .priority}' "$DEFAULTS")"
-create_field "$(fname estimate)" NUMBER
-iters=$(jq -cn --arg s "$start" --argjson d "$days" '
-  [range(0; 4) as $i | {title: "Cycle \($i + 1)", duration: $d,
-    startDate: (($s | strptime("%Y-%m-%d") | mktime) + $i * $d * 86400 | strftime("%Y-%m-%d"))}]')
-create_field "$(fname cycle)" ITERATION "$(jq -cn --arg s "$start" --argjson d "$days" --argjson it "$iters" \
-  '{iterationConfiguration: {startDate: $s, duration: $d, iterations: $it}}')"
-create_field "$(fname targetDate)" DATE
-create_field "$(fname dueDate)" DATE
-create_field "$(fname health)" SINGLE_SELECT "$(jq -c '{singleSelectOptions: .health}' "$DEFAULTS")"
-
-log "writing config to $out"
-fields=$(project_query 'fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType }
-  ... on ProjectV2SingleSelectField { options { id name } } } }')
+log "writing config to $out ($preset, $pace)"
 mkdir -p "$(dirname "$out")"
-jq -n --argjson info "$info" --argjson f "$fields" --slurpfile d "$DEFAULTS" \
-  --arg title "$title" --arg start "$start" --argjson days "$days" '
-  $d[0] as $d
-  | def field($k): ($f.fields.nodes[] | select(.name == $d.fieldNames[$k])) as $x
-      | {id: $x.id, name: $x.name} + (if $x.options then {options: ($x.options | map({(.name): .id}) | add)} else {} end);
+jq -n --argjson info "$info" --slurpfile d "$DEFAULTS" --arg title "$title" --arg pace "$pace" --arg preset "$preset" \
+  --arg days "$days" --arg start "$start" --arg wip "$wip" --arg due "$due" --arg end "$end" '
   {
     ownerType: $info.ownerType, owner: $info.owner, projectNumber: $info.projectNumber,
     projectId: $info.projectId, projectUrl: $info.projectUrl, title: $title,
     slug: ($title | ascii_downcase | gsub("[^a-z0-9]+"; "-") | gsub("^-+|-+$"; "")),
+    pace: $pace, preset: $preset,
+    wipLimit: (if $wip == "" then null else ($wip | tonumber) end),
+    endDate: (if $end == "" then null else $end end),
+    flags: {dueDate: ($due == "on")},
     primaryRepo: null, repos: [],
-    cycle: {durationDays: $days, startDate: $start},
-    fields: ($d.fieldNames | keys_unsorted | map({(.): field(.)}) | add),
-    estimateScale: $d.estimateScale, issueTypes: $d.issueTypes, labels: $d.labels, settings: $d.settings
+    cycle: (if $pace == "timeboxed" then {durationDays: ($days | tonumber), startDate: $start} else null end),
+    fields: {status: {id: $info.statusFieldId, name: "Status"}},
+    catalog: $d[0]
   }' >"$out"
-jq -r '"fields ready: " + (.fields | map(.name) | join(", "))' "$out"
+
+bash "$BOARD" --config "$out" schema-sync --fields --fresh
+jq -r '"fields ready: " + ([.fields[].name] | join(", ")) + "\nstatuses: " + (.fields.status.options | keys_unsorted | join(", "))' "$out"

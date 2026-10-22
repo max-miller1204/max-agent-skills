@@ -1,5 +1,6 @@
 # Installed by github-projects-setup (primary repo only). Posts a native
-# project status update: completed, in progress, rolled over, at-risk projects, overdue.
+# project status update. Timeboxed: completed, in progress, rolled over, at-risk
+# projects, overdue. Self-paced: a "what got done" log with no status.
 name: "board: weekly-digest"
 
 on:

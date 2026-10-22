@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # summary.sh --config FILE
-# Prints what the board now has (fields, views, repos, built-in workflows, secrets)
-# followed by the manual steps that the API cannot do.
+# Prints what the board now has (pace, preset, fields, views, repos, built-in workflows,
+# secrets) followed by the manual steps that the API cannot do.
 source "$(dirname "$0")/common.sh"
 [[ ${1:-} == --config && -n ${2:-} ]] || die "usage: summary.sh --config FILE"
 load_config "$2"
@@ -12,8 +12,10 @@ p=$(project_query 'title url
   repositories(first: 50) { nodes { nameWithOwner } }
   workflows(first: 50) { nodes { name enabled } }')
 
+jq -r '"# \(.title)\n\(.url)\n"' <<<"$p"
+jq -r '"Pace: \(.pace). Preset: \(.preset).\(if .wipLimit then " WIP limit: \(.wipLimit)." else "" end)\(if .endDate then " Ends: \(.endDate)." else "" end) New issues land in: \(.inboxStatus).",
+  "Actions: \([.workflows[] | .file + (if .primary then " (primary repo)" else "" end)] | join(", "))\n"' "$CONFIG"
 jq -r '
-  "# \(.title)\n\(.url)\n",
   "## Fields",
   (.fields.nodes[] | select(.dataType | IN("SINGLE_SELECT","NUMBER","DATE","ITERATION"))
     | "- \(.name) (\(.dataType | ascii_downcase))\(if .options then ": " + ([.options[].name] | join(", ")) else "" end)"),
@@ -35,8 +37,4 @@ for r in $(jq -r '.repos[]' "$CONFIG"); do
 done
 echo
 
-secret_cmds=$(jq -r '.repos[] | "gh secret set PROJECT_TOKEN -R \(.)"' "$CONFIG")
-jq -rn --rawfile t "$SKILL_DIR/references/manual-steps.md" --arg url "$PROJECT_URL" \
-  --arg repos "$(jq -r '.repos | join(", ")' "$CONFIG")" --arg days "$(jq -r .settings.archiveDays "$CONFIG")" \
-  --arg sec "$secret_cmds" \
-  '$t | gsub("__PROJECT_URL__"; $url) | gsub("__REPOS__"; $repos) | gsub("__ARCHIVE_DAYS__"; $days) | gsub("__SECRET_COMMANDS__"; $sec)'
+bash "$BOARD" --config "$CONFIG" render "$SKILL_DIR/references/manual-steps.md"
