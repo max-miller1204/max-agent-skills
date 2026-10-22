@@ -1,0 +1,6 @@
+---
+name: qna
+description: Help digest decisions.
+---
+
+Take any decisions that the user needs to address, and use the AskUserQuestion tool to gather input.
