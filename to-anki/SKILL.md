@@ -25,8 +25,6 @@ ls "$HOME/Library/Application Support/Anki2"                                    
 
 Copy `collection.anki2` (and `-wal`) to the scratchpad and read the copy only. Get the field names per note type and the deck names (the `fields` table needs a `unicase` collation, so read it from Python with `create_collation`). If a course parent deck exists (e.g. `CMDA3654`), nest the new decks under it: `CMDA3654::Quiz 2::L09 Topic`. Mention any empty decks that look meant for this, but don't touch them.
 
-**Live access (optional):** check for the "Anki MCP Server" add-on (AnkiWeb 124672614) with `python3 -I scripts/anki_mcp.py ping`. It answers only while Anki is open with the add-on enabled. When it answers, you can read and edit the live collection (steps 5 to 7). When it doesn't, use the file workflow and don't ask the user to install it. If the add-on is installed but doesn't answer, Anki is probably closed: ask the user to open it.
-
 ## 3. Choose a card type per fact
 
 | Fact | Note type |
@@ -73,30 +71,13 @@ Write a per-course build script that imports `scripts/deck.py` (usage in its doc
 
 **Revising a deck the user already imported:** keep the notes in the same order with the same note types, and pass `keep_guids_from=<previous import file>` to `write()`. Re-import then updates the notes in place and keeps review history. Notes that didn't change show up as "duplicate" in the log, which is expected. Adding or removing notes breaks the order mapping, so give new notes their own rows at the end instead.
 
-**Revising while the add-on answers:** rebuild the file the same way, then apply it live instead of asking for a re-import:
-
-```sh
-python3 -I scripts/anki_mcp.py push <new_import.txt> <previous_import.txt> --dry-run   # review the plan
-python3 -I scripts/anki_mcp.py push <new_import.txt> <previous_import.txt>             # apply, then read back
-```
-
-`push` matches notes by first field (new text, then the previous file's text for that row), so editing a front is fine. It sends only real differences, keeps tags the user added, adds new rows at the end as new notes, and writes nothing if any row matches no note. Review history is kept. It treats HTML that Anki's editor rewrote (`<tbody>`, `&nbsp;`) as unchanged.
-
-Notes added this way get a random GUID, not the file's. After a push that added notes, keep using `push` for that deck: a later text import would duplicate them.
-
-**Fixing one card the user shows you** (a screenshot of a bad card): find it with `anki_mcp.py call find_notes '{"query": "\"deck:<deck>\" <words from the card>"}'`, fix it in the build script too so the file stays the source of truth, then `push`. For other live operations, list the tools with `anki_mcp.py tools` and run one with `anki_mcp.py call <tool> '<json>'`. Don't call destructive tools (`delete_notes`, `card_forget`, `card_set_due_date`, `sync`, model edits) unless the user asked for that exact change.
-
 ## 6. Verify before handing over
 
 Run `scripts/test_import.py` against the collection **copy** with the pip `anki` matching the app version (`--python 3.12 --with "anki==<version>"`). Confirm: every note is new, no problems listed, no non-stock note types, no empty questions, and each Image Occlusion note parses the expected number of shapes. Fix and rebuild until clean.
 
-For a live push, the `--dry-run` plan is the check: the update and add counts should match what you changed. The real push ends by reading every row back and prints `verified: all rows match the file`.
-
 ## 7. Install media and hand over
 
-Copy the media into `<profile>/collection.media/` with `cp -n` (new files only, never overwrite). State this in the plan before doing it. Don't write to `collection.anki2` itself: Anki may be open. Live changes go only through the add-on.
-
-Use the text import for a **first** import even when the add-on answers: it sets the GUIDs, so later re-imports and pushes update notes in place.
+Copy the media into `<profile>/collection.media/` with `cp -n` (new files only, never overwrite). State this in the plan before doing it. Don't write to `collection.anki2` itself: Anki may be open.
 
 Tell the user:
 - the card counts by note type and deck, plus the image and occlusion cards
@@ -104,4 +85,3 @@ Tell the user:
 - import steps: **File > Import**, choose the `.txt` (note types and decks are set inside it), click Import
 - that type-in cards compare exactly, so answer in the stated format
 - if an earlier deck or custom note type from you exists, ask them to delete it first (Browse or Tools > Manage Note Types)
-- after a live push: what changed, and that nothing needs importing
