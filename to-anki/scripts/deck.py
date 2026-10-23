@@ -136,15 +136,18 @@ class Deck:
                     assert content.count("{") == content.count("}"), f"cloze closed early: {content!r}"
                 assert field.count(r"\(") == field.count(r"\)"), f"unbalanced \\( \\): {field[:80]!r}"
                 assert field.count(r"\[") == field.count(r"\]"), f"unbalanced \\[ \\]: {field[:80]!r}"
+                # r"...\"..." keeps the backslash: the card shows \" and MathJax reads it as an accent.
+                assert '\\"' not in field, f"literal \\\" (raw-string quote): {field[:80]!r}"
 
     def write(self, path, keep_guids_from=None):
         """keep_guids_from: a previously imported file with the same notes in the same order. Reusing its
-        GUIDs makes re-import update those notes in place (review history kept) instead of duplicating."""
+        GUIDs makes re-import update those notes in place (review history kept) instead of duplicating.
+        Notes added since then go at the end and keep their own new GUIDs."""
         self.check()
         if keep_guids_from:
             with open(keep_guids_from, encoding="utf-8") as f:
                 old = list(csv.reader((line for line in f if not line.startswith("#")), delimiter="\t"))
-            assert len(old) == len(self.rows), f"{len(old)} old notes vs {len(self.rows)} new"
+            assert len(old) <= len(self.rows), f"{len(old)} old notes vs {len(self.rows)} new: don't remove notes"
             for new, prev in zip(self.rows, old):
                 assert new[0] == prev[0], f"note type changed: {prev[0]} -> {new[0]}"
                 new[3] = prev[3]
