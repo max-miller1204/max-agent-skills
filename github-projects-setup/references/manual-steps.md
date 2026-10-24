@@ -9,10 +9,10 @@ Open __PROJECT_URL__/workflows
 | Workflow | Setting |
 |---|---|
 <!-- when: !hackathon -->
-| Item added to project | Turn on. When: `issue, pull request`. Set Status: **__INBOX__**. The default is Todo. Until you change it, the `git-sync` Action replaces a Todo that this workflow set with __INBOX__ about 10 seconds later. |
+| Item added to project | Turn on. When: `issue`. Set Status: **__INBOX__**. The default is Todo. Until you change it, the `git-sync` Action replaces a Todo that this workflow set with __INBOX__ about 10 seconds later. |
 <!-- end -->
 <!-- when: hackathon -->
-| Item added to project | Turn on. When: `issue, pull request`. Set Status: **Todo** (this is the default). |
+| Item added to project | Turn on. When: `issue`. Set Status: **Todo** (this is the default). |
 <!-- end -->
 <!-- when: canceled -->
 | Item closed | Turn on. Set Status: **Done**. This workflow also sets Done on issues closed as not planned or duplicate. The `git-sync` Action and the board CLI change those to **Canceled** afterwards. |
@@ -20,7 +20,7 @@ Open __PROJECT_URL__/workflows
 <!-- when: !canceled -->
 | Item closed | Turn on. Set Status: **Done**. This board has no Canceled status, so issues closed as not planned also end as Done (they stay closed as not planned). |
 <!-- end -->
-| Pull request merged | Turn on. Set Status: **Done**. |
+| Pull request merged | Turn on. Set Status: **Done**. It only affects pull requests added to the board by hand. |
 <!-- when: review -->
 | Pull request linked to issue | Turn off. The `board: git-sync` Action moves linked issues to In Review. |
 <!-- end -->
@@ -28,7 +28,7 @@ Open __PROJECT_URL__/workflows
 | Pull request linked to issue | Turn off. The `board: git-sync` Action moves linked issues to In Progress. |
 <!-- end -->
 | Auto-close issue | Keep on. When Status changes to Done, GitHub closes the issue. |
-| Auto-add to project | Turn on once for each linked repo: __REPOS__. Filter: `is:issue,pr is:open`. Set the repository in the workflow. Free plans allow only 1 auto-add workflow. If you hit that limit, the `git-sync` Action adds new issues from every linked repo and sets them to __INBOX__. |
+| Auto-add to project | Turn on once for each linked repo: __REPOS__. Filter: `is:issue is:open`. Leave out `pr`: a PR would get its own card next to its issue, land in __INBOX__ with no priority, and show up in triage. Set the repository in the workflow. Free plans allow only 1 auto-add workflow. If you hit that limit, the `git-sync` Action adds new issues from every linked repo and sets them to __INBOX__. |
 | Auto-archive items | Turn on. Filter: `is:issue,pr is:closed updated:<@today-__ARCHIVE_DAYS__d`. Closed items (Done, and Canceled when the board has it) are archived after __ARCHIVE_DAYS__ days. |
 
 ## 2. View settings

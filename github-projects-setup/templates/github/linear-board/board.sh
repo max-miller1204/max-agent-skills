@@ -396,7 +396,8 @@ ensure_future_cycles() {
 
 # ---------------------------------------------------------------- read commands
 
-ACTIVE='(.status != "Done" and .status != "Canceled" and .state != "CLOSED" and .state != "MERGED")'
+# Open work items. Pull request cards are left out: a PR belongs to its issue, not beside it on the board.
+ACTIVE='(.type != "PULL_REQUEST" and .status != "Done" and .status != "Canceled" and .state != "CLOSED" and .state != "MERGED")'
 
 fmt_items() { # JSON array on stdin -> aligned text lines
   jq -r '.[] | [(.ref // "draft"), (.status // "-"), (.priority // "-"), ((.estimate // "-")|tostring),
