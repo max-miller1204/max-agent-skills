@@ -1,6 +1,7 @@
 ---
 name: to-anki
 description: "Turn course materials (lecture PDFs, slides, lab notebooks, notes) into an Anki deck that uses three cloned note types with Extra and Source fields (Basic+, Basic+ (type in), Cloze+) plus stock Image Occlusion, with slide images, verified code-output cards, and a study plan and settings check for the test date. Use when the user asks for Anki flashcards or a study deck from a folder of materials, or to add a new lecture to an existing deck."
+disable-model-invocation: true
 ---
 
 # Course materials to Anki

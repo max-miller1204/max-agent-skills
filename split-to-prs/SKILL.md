@@ -3,6 +3,7 @@ name: split-to-prs
 description: >-
   Split current work into small reviewable pull requests. Use when the user asks
   to split a conversation, set of changes, branch, or pull request.
+disable-model-invocation: true
 ---
 # Split to PRs
 

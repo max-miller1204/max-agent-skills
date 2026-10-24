@@ -8,6 +8,7 @@ description: >-
   and a weekly digest. Then generate a project-local board skill that can also
   upgrade the board later. Use when the user wants to set up a new GitHub
   project board "like Linear".
+disable-model-invocation: true
 ---
 # GitHub Projects setup (Linear-style)
 

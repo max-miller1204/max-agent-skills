@@ -1,6 +1,7 @@
 ---
 name: verify
 description: "Verify code changes through real user paths and maintain project verification skills with proven recipes. Use to check new code, verify all features, or set up and repair verification tooling."
+disable-model-invocation: true
 ---
 
 # Verify behavior and maintain verification skills

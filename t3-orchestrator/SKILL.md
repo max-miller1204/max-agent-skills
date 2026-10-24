@@ -1,6 +1,7 @@
 ---
 name: t3-orchestrator
 description: Coordinate an ongoing stream of work.
+disable-model-invocation: true
 ---
 
 # Orchestrator
