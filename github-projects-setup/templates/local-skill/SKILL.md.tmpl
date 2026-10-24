@@ -12,9 +12,9 @@ description: >-
 description: >-
   Self-paced workflow for the "__TITLE__" GitHub Projects board: triage inbox,
   create issues with priority, pick what to work on next (with a WIP limit),
-  log what got done, manage projects, sync labels, and upgrade the board. Use
+  log what got done, <!-- projects -->manage projects, <!-- /projects -->sync labels, and upgrade the board. Use
   when the user asks to triage, file an issue, decide what is next, see what
-  got done, update a project, or upgrade the board.
+  got done, <!-- projects -->update a project, <!-- /projects -->or upgrade the board.
 <!-- end -->
 ---
 # __TITLE__ board
@@ -59,6 +59,7 @@ Run commands from the root of __PRIMARY_REPO__, with `LINEAR_BOARD_CONFIG` set a
 <!-- when: projects self-paced -->
 | Project | Parent issue labeled `project`, with sub-issues. Lead = assignee. Progress = sub-issues done (no target date or health) |
 <!-- end -->
+| Blocked by | GitHub issue dependencies (`board block`). Shown on the issue and the board card. A closed blocker no longer counts |
 | Type | Label: __TYPES_LIST__ |
 <!-- when: canceled -->
 | Duplicate | Closed as duplicate, Status = Canceled |
@@ -143,7 +144,7 @@ Ask only for the values that are missing. Use the defaults: type from context, p
 
 ```
 board create --repo REPO --title "..." --body "..." --type __TYPES__ \
-  --priority High --estimate 3 --cycle @current --due 2026-12-01 --parent '#4' --assignee @me
+  --priority High --estimate 3 --cycle @current --due 2026-12-01 --parent '#4' --assignee @me --blocked-by '#3'
 ```
 
 Leave out the flags for fields the board does not have (see `board profile`). Status defaults to Todo when a cycle is set, else <!-- backlog -->Backlog<!-- /backlog --><!-- !backlog -->Todo<!-- /!backlog -->. Use `--status __INBOX__` to send the issue to the inbox.
@@ -153,7 +154,7 @@ Ask only for the values that are missing. Use the defaults: type from context, p
 
 ```
 board create --repo REPO --title "..." --body "..." --type __TYPES__ --priority High \
-  [--estimate 3] [--due 2026-12-01] [--parent '#4'] [--assignee @me] [--status Todo]
+  <!-- estimate -->[--estimate 3] <!-- /estimate --><!-- dueDate -->[--due 2026-12-01] <!-- /dueDate --><!-- projects -->[--parent '#4'] <!-- /projects -->[--assignee @me] [--status Todo] [--blocked-by '#3']
 ```
 
 Use only the flags for fields the board has (see `board profile`). Status defaults to <!-- backlog -->Backlog (Later)<!-- /backlog --><!-- !backlog -->Todo<!-- /!backlog -->. Use `--status Todo` for Next.
@@ -161,12 +162,13 @@ Use only the flags for fields the board has (see `board profile`). Status defaul
 <!-- when: projects -->
 `--parent` makes the new issue a sub-issue of a project issue.
 <!-- end -->
+When the issue cannot start until other issues are done, add `--blocked-by '#3,#5'`. For an existing issue, run `board block REF BLOCKER_REF...` (`board unblock` removes links). When you file a batch of related issues, create the blockers first so you can reference them.
 Report the URL.
 
 <!-- when: cycle -->
 ## 3. Cycle planning and review
 
-- Plan: `board plan --cycle @next` shows scope against the average velocity of the last 3 cycles (points completed), plus unscheduled Todo and Backlog candidates by priority. Propose a scope that fits capacity. After the user agrees, schedule each item: `board set REF cycle=@next`. If the cycle is over capacity, say which low-priority items to drop.
+- Plan: `board plan --cycle @next` shows scope against the average velocity of the last 3 cycles (points completed), plus unscheduled Todo and Backlog candidates by priority. Propose a scope that fits capacity. Check `board show REF` for `blockedBy`: leave out items whose blockers will not finish this cycle. After the user agrees, schedule each item: `board set REF cycle=@next`. If the cycle is over capacity, say which low-priority items to drop.
 - Review: `board review --cycle @last` (or a title). It shows completed, canceled, still open, rolled over, and scope added after the cycle start. Summarize it in a few lines and point out patterns (for example, repeated rollovers or large unestimated items).
 - List cycles: `board cycles`.
 <!-- when: !cycle-rollover -->
@@ -179,9 +181,10 @@ Report the URL.
 Run `board next` (or `board next --limit 10`). It shows:
 
 - **Now**: items In Progress<!-- review --> or In Review<!-- /review -->, and the WIP count against the limit of __WIP__.
-- **Next**: open Todo<!-- backlog --> and Backlog<!-- /backlog --> items, ordered by priority (Urgent first), then by age (oldest first).
+- **Next**: open Todo<!-- backlog --> and Backlog<!-- /backlog --> items with no open blockers, ordered by priority (Urgent first), then by age (oldest first).
+- **Blocked**: open items that wait on other open issues, with what each one waits on.
 
-Suggest the top item. When the user starts it, run `board set REF status="In Progress"`. If the board is over the WIP limit, the command prints a warning: tell the user and suggest finishing or pausing something first. Do not refuse to start the item.
+Suggest the top Next item. If a Blocked item outranks it, say what it waits on, such as "#14 waits on #13". If the user wants a blocked item anyway, suggest working on its blockers first. When the user starts it, run `board set REF status="In Progress"`. If the board is over the WIP limit, the command prints a warning: tell the user and suggest finishing or pausing something first. Do not refuse to start the item.
 
 To see what got done, run `board digest --dry-run`.
 <!-- end -->

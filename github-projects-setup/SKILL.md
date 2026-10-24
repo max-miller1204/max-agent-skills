@@ -22,7 +22,7 @@ Two independent choices. Always ask both. There is no default.
 | Pace | What it means |
 |---|---|
 | **Timeboxed** | Cycles with rollover, Target date and Health on projects, Due date, Urgent SLA, `overdue` label, Overdue / SLA view. Weekly digest with on-track / at-risk status. |
-| **Self-paced** | No cycles, Target date, Health, SLA, or overdue. Projects show sub-issue progress only. Due date is optional (off by default). A **WIP limit** (max In Progress items) warns but never blocks. A Now / Next / Later board replaces Active cycle. The digest is a "what got done" log. The local skill has `next` (top items by priority, then age) instead of cycle plan and review. |
+| **Self-paced** | No cycles, Target date, Health, SLA, or overdue. Projects show sub-issue progress only. Due date is optional (off by default). A **WIP limit** (max In Progress items) warns but never blocks. A Now / Next / Later board replaces Active cycle. The digest is a "what got done" log. The local skill has `next` (top unblocked items by priority, then age) instead of cycle plan and review. |
 
 | Preset | What it means |
 |---|---|
@@ -46,6 +46,7 @@ Upgrades are add-only and run from the generated local skill (`board.sh upgrade`
 | Estimate | `Estimate` number: 1, 2, 3, 5, 8 |
 | Cycles | `Cycle` iteration field. Rollover by Action |
 | Projects | Parent issue labeled `project` with sub-issues. `Target date`, `Health`, Lead = assignee |
+| Blocked by | Native GitHub issue dependencies: `board create --blocked-by`, `board block`, `board unblock`. `next` skips blocked items and lists what they wait on |
 | Labels / type | `bug`, `feature`, `improvement`, `chore`, `project` in every linked repo |
 | Due date | `Due date` |
 | Project updates | Native project status updates |
