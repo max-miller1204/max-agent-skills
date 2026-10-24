@@ -15,30 +15,32 @@ Verified with Anki 26.9.3 by importing into a collection copy through the pip `a
 
 Columns 5+ are the note's fields in order. Rows for note types with fewer fields get padded with empty columns up to 5; Anki ignores the extras. `deck.py` writes this.
 
-- **Note type and deck names must match exactly**, including `Basic (type in the answer)`. Decks that don't exist yet are created on import. `::` nests decks.
-- **GUID column**: a stable hash per note, so re-importing a fixed file updates notes instead of duplicating them.
+- **Note type and deck names must match exactly**, including `Basic+ (type in)`. The importer can't create note types: install them first with the `.apkg` from `notetypes.py`. Decks that don't exist yet are created on import. `::` nests decks.
+- **GUID column**: a stable hash of the note's `id=` (or of note type + first field when there is no id), saved in `<Name>_import_guids.json`. Re-importing a fixed file updates notes instead of duplicating them.
+- **What re-import changes** (verified with 26.9.3): fields and tags of a note with a matching GUID are replaced by the file's. Its cards stay in their current deck: the deck column only applies to new notes. A note whose fields, tags and note type are unchanged is logged as a duplicate.
+- **Tags**: space-separated, no spaces inside a tag, `::` nests. Matching is case-insensitive and an existing tag's casing wins (an existing `cmda3654` turns an imported `CMDA3654::exam::Quiz2` into `cmda3654::exam::Quiz2`).
 - **No raw newlines in fields.** `deck.py` converts `\n` to `<br>`, which also breaks lines inside `<pre>`.
 - Python's `csv` writer (tab, `QUOTE_MINIMAL`) quotes fields that contain `"`; Anki reads that correctly.
 
-## Stock note type fields
+## Note type fields
 
 | Note type | Fields |
 |---|---|
-| Basic | Front, Back |
-| Basic (and reversed card) | Front, Back |
-| Basic (optional reversed card) | Front, Back, Add Reverse |
-| Basic (type in the answer) | Front, Back |
-| Cloze | Text, Back Extra |
-| Image Occlusion | Occlusion, Image, Header, Back Extra, Comments |
+| Basic+ | Front, Back, Extra, Source, Add Reverse |
+| Basic+ (type in) | Front, Back, Extra, Source |
+| Cloze+ | Text, Back Extra, Source |
+| Image Occlusion (stock) | Occlusion, Image, Header, Back Extra, Comments |
+
+**Changing a note's type through import doesn't work**: a GUID match with a different note type is a conflict. Convert existing notes first with Browse > Notes > Change Note Type (verified with 26.9.3: cards, decks, scheduling and review history are kept, reverse cards map Card 1 → Card 1 and Card 2 → Card 2, and it needs one one-way sync).
 
 Check the user's actual fields in step 2; renamed fields shift the mapping.
 
-## Rendering pitfalls with stock templates
+## Rendering pitfalls
 
-- The stock CSS centers everything. A plain `<pre>` then centers each line and breaks DataFrame alignment. Use `Deck.pre()`, which sets `text-align:left; display:inline-block`.
-- **Type-in** compares the typed text to Back exactly, and its back template shows only that comparison. Keep Back plain text with no explanation, and state the format in the question.
-- Tables: inline `border="1" cellpadding="4"` styling, since there's no custom CSS.
-- Explanations on Basic cards go after `<br><br><i>...</i>`; on Cloze and IO they go in Back Extra.
+- Card text is centered. The note types' CSS left-aligns `<pre>` and tables, and `Deck.pre()` also inlines `text-align:left; display:inline-block` so code stays aligned on stock Image Occlusion cards.
+- **Type-in** compares the typed text to Back exactly. Keep Back plain text, state the format in the question, and put any explanation in Extra (it shows under the comparison).
+- Tables: `tables.py` inlines its styles with translucent colors, so they read in light and night mode and on stock IO cards too.
+- Explanations go in Extra (Basic+, Basic+ (type in)) or Back Extra (Cloze+, IO). Sources go in Source; IO has no Source field, so `deck.py` appends it to Back Extra.
 - Cloze text can't contain `}}` or `::` inside a deletion. `Deck.check()` (run by `write()`) catches a deletion that closes early.
 
 ## Math (MathJax)
