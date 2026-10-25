@@ -1,6 +1,6 @@
 interface:
   display_name: "t3-orchestrator"
   short_description: "Coordinate work"
-  default_prompt: "Use $orchestrator to coordinate this project"
+  default_prompt: "Use $t3-orchestrator to coordinate this project"
 policy:
   allow_implicit_invocation: false
