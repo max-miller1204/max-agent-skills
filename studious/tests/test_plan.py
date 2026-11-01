@@ -175,6 +175,12 @@ def test_future_days_count_due_reviews():
     assert [d['due'] for d in p['days'][:3]] == [0, 0, 2]
 
 
+def test_new_cards_come_back_the_next_day():
+    cards = [card(i, goals=['Test2']) for i in range(40)]
+    p = planner.plan(state([goal(date='2026-11-02')], courses={'CS3214': course(cards)}))
+    assert p['days'][0]['new'] == 40 and p['days'][1]['due'] == 40
+
+
 def test_deterministic():
     cards = [card(i, goals=['Test2']) for i in range(50)]
     s = state([goal()], [lesson(n) for n in range(1, 5)], courses={'CS3214': course(cards)})

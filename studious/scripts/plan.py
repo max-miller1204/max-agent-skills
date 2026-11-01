@@ -236,9 +236,10 @@ def plan(state):
     for p in pushed_now:  # this run pushes these, so their cards are in today's pool
         pool[by_path[p]['course']] = pool.get(by_path[p]['course'], 0) + unpushed(by_path[p])
     days = []
+    carry = 0  # estimate: each new card comes back for one review the next day
     for k in range(horizon):
         date = today + datetime.timedelta(days=k)
-        new = due = 0
+        new, due = 0, carry
         for code, out in course_out.items():
             course = courses.get(code) or {}
             rate = out['new_today'] if (k == 0 and out['new_today'] is not None) else out['new_per_day']
@@ -255,6 +256,7 @@ def plan(state):
             if p not in pushed_now:
                 l = by_path[p]
                 pool[l['course']] = pool.get(l['course'], 0) + unpushed(l)
+        carry = new
         todays = [by_path[p] for p in days_lessons[k]]
         cards_total = new + due
         title = f"[studious] Daily quota: {plural(cards_total, 'card')} · {plural(len(todays), 'lesson')}"
