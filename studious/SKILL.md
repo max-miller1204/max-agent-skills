@@ -18,7 +18,7 @@ script prints JSON. Paths below are relative to the vault (`~/vault` unless `STU
 |---|---|
 | `/studious daily` | The scheduled run. Run `scripts/daily.py`, then report. Ask nothing. |
 | `/studious` or `/studious <free text>` | Interactive: preflight, inbox, then whatever the text asks (or whatever is due). |
-| `/studious setup` | Onboarding (references/onboarding.md). Also runs when `studious/config.md` is missing. |
+| `/studious setup` | Onboarding (references/onboarding.md): machine check, vault (`scripts/setup_vault.py`), sync, interview, goals, schedule. Also runs when `studious/config.md` is missing. |
 
 ## Daily mode
 
@@ -45,9 +45,9 @@ script prints JSON. Paths below are relative to the vault (`~/vault` unless `STU
    - "cram cs3214 test2" → set `cram: true` in that goal;
    - "fix my flagged cards" → Flag and fix below;
    - nothing → ingest what's new (bounded), then the daily steps.
-4. **Deadlines.** Look at the user's calendars for the next 120 days (the calendar tools, or ask
-   the user to paste their schedule) for exams, tests, quizzes, midterms, finals or interviews that
-   have no goal yet, and ask whether to adopt each.
+4. **Deadlines.** `uv run scripts/calendar_events.py deadlines` lists exam-like events in the next
+   120 days that have no goal yet. Ask whether to adopt each (tentative ones can wait); adopting
+   means a goal note with `calendar_event_id` set to the event's id.
 5. **Finish** with `uv run scripts/daily.py` so Anki, timetables and the calendar reflect the changes,
    and summarize what changed.
 
@@ -80,7 +80,8 @@ id: Exam2                 # used in tags: CS4804::exam::Exam2
 course: CS4804
 title: CS4804 Exam 2
 mode: deadline            # deadline | self-paced-budget (+ weekly_hours) | self-paced-casual
-date: 2026-11-20          # deadline mode
+date: 2026-11-20          # deadline mode; keep it equal to the calendar event's date
+calendar_event_id: abc123 # the adopted calendar event, when there is one
 status: active            # active | done | archived
 cram: false               # true forces cram mode
 ---
@@ -121,7 +122,8 @@ studious/calendar.json  managed calendar events                 attachments/
 ```
 
 Scripts: `anki.py` (Anki), `snapshot.py` → `plan.py` (pure planner) → `timetable.py`,
-`calendar_events.py` (Google Calendar via google-calendar-mcp), `daily.py` (all of it),
-`manifest.py` (source diffs), `slides.py` (PDF page renders and crops).
+`calendar_events.py` (Google Calendar via google-calendar-mcp: daily events, deadline scan),
+`daily.py` (all of it), `manifest.py` (source diffs), `slides.py` (PDF page renders and crops),
+`setup_vault.py` (vault scaffold).
 Connectors (patched AnkiConnect, calendar setup) live in `max-miller1204/studious-connectors`;
 `anki.py doctor` clones them when missing.

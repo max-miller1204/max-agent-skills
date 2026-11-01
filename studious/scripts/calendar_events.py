@@ -1,9 +1,19 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml>=6"]
+# ///
 """studious all-day events in Google Calendar, through google-calendar-mcp (spawned over stdio).
 
-    python3 calendar_events.py calendars
-    python3 calendar_events.py sync PLAN.json [--calendar ID] [--vault DIR] [--dry-run]
-    python3 calendar_events.py clear [--calendar ID] [--vault DIR]
+    uv run calendar_events.py calendars
+    uv run calendar_events.py sync PLAN.json [--calendar ID] [--vault DIR] [--dry-run]
+    uv run calendar_events.py clear [--calendar ID] [--vault DIR]
+    uv run calendar_events.py deadlines [--days 120] [--vault DIR]
+
+`deadlines` reads (never writes) the calendars named in config `deadline_calendars` (all calendars
+when unset) for events that look like exams, tests, quizzes, midterms, finals or interviews in the
+next `--days` days, and leaves out those already adopted (a goal note whose `calendar_event_id`
+matches). The agent asks the user before adopting any.
 
 `sync` writes one all-day event per day of plan.json's `days` to the configured calendar. It keeps
 `<vault>/studious/calendar.json` (date -> event id, Google's `updated` stamp, content hash):
@@ -208,6 +218,41 @@ def clear(cal, calendar_id, vault):
     return done
 
 
+DEADLINE = re.compile(r'\b(exams?|tests?|quiz(zes)?|midterms?|finals?|interviews?)\b|\btest\s*\d|\bquiz\s*\d', re.I)
+
+
+def deadlines(cal, vault, days):
+    import yaml
+    path = Path(vault) / 'studious/config.md'
+    m = re.match(r'---\n(.*?)\n---', path.read_text(), re.S) if path.exists() else None
+    config = (yaml.safe_load(m.group(1)) or {}) if m else {}
+    calendars = cal.tool('list-calendars')
+    calendars = calendars.get('calendars', calendars) if isinstance(calendars, dict) else calendars
+    wanted = config.get('deadline_calendars')
+    chosen = [c for c in calendars if not wanted or c.get('summary') in wanted or c.get('id') in wanted]
+    adopted = set()
+    for goal in (Path(vault) / 'goals').glob('*.md'):
+        hit = re.search(r'^calendar_event_id:\s*(\S+)', goal.read_text(), re.M)
+        if hit:
+            adopted.add(hit.group(1).strip('"\''))
+    today = datetime.date.today()
+    end = today + datetime.timedelta(days=days)
+    found = []
+    for c in chosen:
+        if c.get('id') == config.get('calendar_id'):
+            continue
+        events = events_of(cal.tool('list-events', calendarId=c['id'], timeMin=f'{today}T00:00:00',
+                                    timeMax=f'{end}T00:00:00'))
+        for e in events:
+            summary = str(e.get('summary', ''))
+            if e.get('id') in adopted or summary.startswith(PREFIX) or not DEADLINE.search(summary):
+                continue
+            start = e.get('start') or {}
+            found.append(dict(calendar=c.get('summary'), eventId=e.get('id'), summary=summary,
+                              date=(start.get('date') or start.get('dateTime', ''))[:10]))
+    return sorted(found, key=lambda f: (f['date'], f['summary']))
+
+
 def configured_calendar(vault):
     path = Path(vault) / 'studious/config.md'
     if path.exists():
@@ -219,9 +264,10 @@ def configured_calendar(vault):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('cmd', choices=['calendars', 'sync', 'clear'])
+    parser.add_argument('cmd', choices=['calendars', 'sync', 'clear', 'deadlines'])
     parser.add_argument('plan', nargs='?')
     parser.add_argument('--calendar')
+    parser.add_argument('--days', type=int, default=120)
     parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'vault')))
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
@@ -236,6 +282,8 @@ def main(argv=None):
             items = result.get('calendars', result) if isinstance(result, dict) else result
             out = [dict(id=c.get('id'), name=c.get('summary') or c.get('name'), primary=c.get('primary', False))
                    for c in items] if isinstance(items, list) else items
+        elif args.cmd == 'deadlines':
+            out = deadlines(cal, args.vault, args.days)
         else:
             calendar_id = args.calendar or configured_calendar(args.vault)
             if not calendar_id:
