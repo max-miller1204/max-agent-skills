@@ -14,12 +14,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-FOLDERS = ['studious/runs', 'studious/manifests', 'goals', 'courses', 'timetable', 'sources', 'attachments',
+FOLDERS = ['studious/runs', 'studious/manifests', 'goals', 'courses', 'timetable', 'attachments',
            '.obsidian/snippets']
 SNIPPET = """.callout[data-callout="card"] { --callout-color: 59, 110, 165; --callout-icon: lucide-layers; }
 .callout[data-callout="supplementary"] { --callout-color: 130, 130, 130; --callout-icon: lucide-book-plus; }
 """
-IGNORES = ['.obsidian/workspace*.json', '.trash/', '.DS_Store', 'studious/cache/']
+IGNORES = ['.obsidian/workspace*.json', '.trash/', '.DS_Store']
 CONFIG = """---
 # studious settings. See references/onboarding.md in the skill for every key.
 anki_profile: testing
@@ -35,7 +35,8 @@ cram_days: 2
 ---
 # studious config
 
-Edit with `/studious setup`, or by hand.
+The settings are in this note's properties (above). `/studious setup` fills them in; you can also
+edit them here. Every key and its default is in the skill's `references/onboarding.md`.
 """
 
 

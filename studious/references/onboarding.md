@@ -29,7 +29,7 @@ Then sync, one method per device (never the desktop app's Sync and Headless on t
 | Device | How |
 |---|---|
 | The scheduled machine (Linux desktop) | Obsidian Headless as a user service, below. If the Obsidian app is also used there, keep its Sync plugin off. |
-| Mac, phone | The Obsidian app with the core Sync plugin, connected to the same remote vault. |
+| Mac, phone | The Obsidian app with the core Sync plugin, connected to the same remote vault. In Settings > Sync, turn on **Sync all other types** (practice code, manifests and the calendar record are not notes, and interactive runs on that device need them), and in Settings > Files and links turn on **Detect all file extensions** so code files show in the file list. |
 
 Headless setup (needs an Obsidian Sync subscription and Node 22+):
 
@@ -47,7 +47,7 @@ Without mise: `npm install -g obsidian-headless`. Then:
 ob login
 ob sync-create-remote --name studious --encryption standard   # first device only; others: ob sync-list-remote
 ob sync-setup --vault <id from the line above> --path ~/studious --device-name "$(hostname)"
-ob sync-config --path ~/studious --file-types image,pdf,unsupported --excluded-folders studious/cache \
+ob sync-config --path ~/studious --file-types image,pdf,unsupported \
   --configs appearance,appearance-data
 ob sync --path ~/studious                    # first sync, watch it finish
 ```

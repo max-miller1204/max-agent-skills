@@ -14,7 +14,8 @@ Rules (Anki and FSRS guidance on workload, plus lesson pacing):
   Overlapping goals of one course count the union of their scopes, nearest deadline first.
 - Lessons are paced to be done `lesson_buffer_days` before the deadline, at most
   `max_lessons_per_day` across all goals, nearest deadline first. A goal whose lessons or cards don't
-  fit switches to cram mode: lessons may run until the day before, cards are pushed without waiting
+  fit switches to cram mode: lessons may run until the day before (all of them scheduled, over the
+  per-day cap if need be, with a warning), cards are pushed without waiting
   for lessons, and for the last `cram_days` a filtered deck of its weakest cards is built.
 - A course with new cards but no deadline pressure gets `casual_new_per_day`.
 - A course marked `done: true` in the config gets no new cards (its decks move to the done preset).
@@ -250,10 +251,15 @@ def plan(state):
         capacity, todays = max_lessons, []
         for g in deadline_goals:
             pending = [p for p in queue[g['id'] + '@' + g['course']] if p not in scheduled]
-            if not pending or capacity <= 0 or k > g['days_left'] - 1:
+            if not pending or (capacity <= 0 and not g['cram']) or k > g['days_left'] - 1:
                 continue
             days_to_go = max(1, g['lessons_due_by'] - k + 1)
-            take = min(capacity, math.ceil(len(pending) / days_to_go))
+            take = math.ceil(len(pending) / days_to_go)
+            if not g['cram']:
+                take = min(capacity, take)
+            elif take > capacity and k == 0:  # cram: every lesson gets a day, even over the cap
+                warnings.append(f"{g['title']}: {plural(len(pending), 'lesson')} left in "
+                                f"{plural(days_to_go, 'day')}, more than max_lessons_per_day; all are scheduled.")
             for p in pending[:take]:
                 todays.append(p)
                 scheduled.add(p)

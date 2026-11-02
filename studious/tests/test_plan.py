@@ -266,3 +266,11 @@ def test_inbox_suggests_done_after_the_final():
     g = goal('Final', date='2026-10-20', title='CS3214 Final Exam')
     p = planner.plan(state([g]))
     assert any('mark it `done: true`' in item for item in p['inbox'])
+
+
+def test_cram_schedules_every_lesson_over_the_cap():
+    ls = [lesson(n, cards=2) for n in range(1, 10)]
+    p = planner.plan(state([goal(date='2026-11-03')], lessons=ls))
+    days = [len(d['lessons']) for d in p['days'][:3]]
+    assert days == [5, 4, 0]
+    assert any('all are scheduled' in w for w in p['warnings'])

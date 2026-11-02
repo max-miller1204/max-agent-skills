@@ -113,7 +113,8 @@ class Run:
 
     # ---- plan and apply ----
     def make_plan(self):
-        state_path = self.vault / 'studious/cache/state.json'
+        cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'studious'
+        state_path = cache / f'state-{self.vault.name}.json'  # scratch, kept out of the synced vault
         state_path.parent.mkdir(parents=True, exist_ok=True)
         code = snapshot.main(['--vault', str(self.vault), '--out', str(state_path)])
         state = json.loads(state_path.read_text())
