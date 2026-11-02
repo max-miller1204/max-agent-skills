@@ -34,7 +34,14 @@ views:
     sort:
       - property: date
         direction: ASC
-    columnSize: {}
+    columnSize:
+      note.goal_note: 220
+      note.date: 130
+      formula.days_left: 85
+      note.cram: 65
+      note.lessons_left: 105
+      note.minutes_left: 110
+      note.new_cards_per_day: 125
   - type: table
     name: To read
     filters:
@@ -57,7 +64,12 @@ views:
         direction: ASC
     summaries:
       minutes: Sum
-    columnSize: {}
+    columnSize:
+      file.name: 220
+      note.title: 260
+      note.goals: 120
+      note.minutes: 90
+      note.done: 65
   - type: table
     name: All lessons
     filters:
@@ -79,6 +91,13 @@ views:
         direction: ASC
     summaries:
       minutes: Sum
+    columnSize:
+      file.name: 220
+      note.title: 260
+      note.goals: 120
+      note.minutes: 90
+      note.verified: 80
+      note.done: 65
   - type: table
     name: Needs checking
     filters:
@@ -94,3 +113,8 @@ views:
     sort:
       - property: file.name
         direction: ASC
+    columnSize:
+      file.name: 220
+      note.title: 260
+      note.course: 100
+      note.goals: 120
