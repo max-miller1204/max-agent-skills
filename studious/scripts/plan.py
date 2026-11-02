@@ -43,6 +43,11 @@ def exam_tag(goal):
     return f"{goal['course']}::exam::{goal['id']}".lower()
 
 
+def cram_name(goal):
+    """Inside the course deck, so studying the course includes the cram cards."""
+    return f"{goal['course']}::{goal['id']} cram"
+
+
 def in_scope(card, goal):
     tag = exam_tag(goal)
     return any(t.lower() == tag for t in card.get('tags') or [])
@@ -129,12 +134,12 @@ def plan(state):
         if g.get('status', 'active') != 'active':
             continue
         if g['course'] in retired:
-            cram_delete.append(f"{g['course']} {g['id']} cram")
+            cram_delete.append(cram_name(g))
             continue
         days_left = (day(g['date']) - today).days if g.get('date') else None
         if days_left is not None and days_left < 0:
             inbox.append(f"{g['title']} was on {g['date']}: keep, archive or carry its cards?")
-            cram_delete.append(f"{g['course']} {g['id']} cram")
+            cram_delete.append(cram_name(g))
             continue
         scope_lessons = [l for l in lessons if l['course'] == g['course'] and g['id'] in l['goals']]
         cards = courses.get(g['course'], {}).get('cards') or []
@@ -298,7 +303,7 @@ def plan(state):
     cram = []
     for g in cram_goals:
         if g['days_left'] <= int(cfg['cram_days']):
-            cram.append(dict(name=f"{g['course']} {g['id']} cram", limit=9999,
+            cram.append(dict(name=cram_name(g), limit=9999,
                              search=f'deck:"{g["course"]}" tag:{g["course"]}::exam::{g["id"]} prop:r<0.85'))
 
     # ---- the next days: card counts and calendar text ---------------------------------------------

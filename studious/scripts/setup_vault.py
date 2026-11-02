@@ -80,7 +80,7 @@ courses:
 | Key | Default | What it does |
 |---|---|---|
 | `lesson_buffer_days` | `3` | Lessons are scheduled to finish this many days before a deadline, leaving those days for reviews. |
-| `cram_days` | `2` | In cram mode, the last this many days before an exam get a filtered deck of your weakest cards (`CS3214 Test2 cram`). |
+| `cram_days` | `2` | In cram mode, the last this many days before an exam get a filtered deck of your weakest cards (`CS3214::Test2 cram`, inside the course deck). |
 
 A goal switches to cram mode by itself when its lessons or cards can't fit at the normal pace, or
 when you set `cram: true` in the goal note.

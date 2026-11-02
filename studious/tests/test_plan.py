@@ -96,7 +96,7 @@ def test_too_many_lessons_means_cram():
 def test_cram_deck_in_the_final_days():
     ls = [lesson(n) for n in range(1, 4)]
     p = planner.plan(state([goal(date='2026-11-03')], ls))
-    assert p['cram'] == [dict(name='CS3214 Test2 cram', limit=9999,
+    assert p['cram'] == [dict(name='CS3214::Test2 cram', limit=9999,
                               search='deck:"CS3214" tag:CS3214::exam::Test2 prop:r<0.85')]
 
 
@@ -145,7 +145,7 @@ def test_reposition_puts_scope_first_interleaving_lessons():
 def test_past_goal_asks_and_removes_cram_deck():
     p = planner.plan(state([goal(date='2026-10-30')]))
     assert any('keep, archive or carry' in i for i in p['inbox'])
-    assert p['cram_delete'] == ['CS3214 Test2 cram']
+    assert p['cram_delete'] == ['CS3214::Test2 cram']
 
 
 def test_goal_without_material_reminds_within_21_days():
@@ -277,7 +277,7 @@ def test_retired_course_is_suspended_and_left_out():
     assert p['suspend'] == [1, 2] and p['unsuspend'] == [] and p['retired'] == {'CS3214': [1, 2]}
     assert p['courses']['CS3214']['retired'] and p['courses']['CS3214']['new_per_day'] == 0
     assert p['push'] == [] and p['goals'] == [] and not any(d['lessons'] for d in p['days'])
-    assert p['cram_delete'] == ['CS3214 Test2 cram'] and not p['inbox']
+    assert p['cram_delete'] == ['CS3214::Test2 cram'] and not p['inbox']
 
 
 def test_unretiring_unsuspends_only_what_studious_suspended():
