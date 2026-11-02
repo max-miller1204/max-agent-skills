@@ -34,16 +34,28 @@ Then sync, one method per device (never the desktop app's Sync and Headless on t
 Headless setup (needs an Obsidian Sync subscription and Node 22+):
 
 ```bash
-dots pkg pkg-add npm:obsidian-headless    # or: npm install -g obsidian-headless
+dots pkg add npm:obsidian-headless       # or: npm install -g obsidian-headless
 ob login
-ob sync-create-remote --name vault        # first device only; others: ob sync-list-remote
-ob sync-setup --vault vault --path ~/vault --device-name "$(hostname)"
-ob sync-config --path ~/vault --file-types image,pdf,unsupported --excluded-folders studious/cache
+ob sync-create-remote --name vault --encryption standard   # first device only; others: ob sync-list-remote
+ob sync-setup --vault <id from the line above> --path ~/vault --device-name "$(hostname)"
+ob sync-config --path ~/vault --file-types image,pdf,unsupported --excluded-folders studious/cache \
+  --configs appearance,appearance-data
 ob sync --path ~/vault                    # first sync, watch it finish
 ```
 
 `unsupported` makes JSON and code files sync too (manifests, the calendar record, practice code).
-Dot-folders such as `.git` never sync, so each machine keeps its own undo log.
+`appearance-data` carries the callout CSS snippet to the other devices. Dot-folders such as `.git`
+never sync, so each machine keeps its own undo log.
+
+If `ob sync-config` fails with "Could not locate the bindings file" (mise installs skip native
+builds), fetch the prebuilt SQLite module and retry:
+
+```bash
+cd "$(dirname "$(find ~/.local/share/mise/installs/npm-obsidian-headless -path '*node_modules/better-sqlite3/package.json' | head -1)")"
+npx --yes prebuild-install@7
+```
+
+An upgrade of `obsidian-headless` needs this again.
 
 Run it continuously:
 
@@ -55,7 +67,8 @@ Description=Obsidian Headless sync for the studious vault
 After=network-online.target
 
 [Service]
-ExecStart=/usr/bin/env ob sync --path %h/vault --continuous
+Environment=PATH=%h/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/share/mise/shims/ob sync --path %h/vault --continuous
 Restart=on-failure
 RestartSec=30
 
@@ -65,7 +78,7 @@ EOF
 systemctl --user daemon-reload && systemctl --user enable --now studious-obsidian-sync
 ```
 
-If `ob` isn't on the service's PATH (mise installs), use its absolute path from `command -v ob`.
+Without mise, drop the `Environment` line and use the path from `command -v ob`.
 Then set `obsidian_sync_service: studious-obsidian-sync` in the config, and the daily run stops
 (with an inbox note) whenever the service isn't running, rather than planning from a stale vault.
 
