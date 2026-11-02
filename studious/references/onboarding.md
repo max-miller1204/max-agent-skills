@@ -71,7 +71,7 @@ After=network-online.target
 
 [Service]
 Environment=PATH=%h/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/.local/share/mise/shims/ob sync --path %h/vault --continuous
+ExecStart=%h/.local/share/mise/shims/ob sync --path %h/studious --continuous
 Restart=on-failure
 RestartSec=30
 
