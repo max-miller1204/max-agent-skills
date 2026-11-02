@@ -7,6 +7,9 @@ No I/O besides reading the state and writing the plan; same input, same output.
 
 Rules (Anki and FSRS guidance on workload, plus lesson pacing):
 - New cards/day budget for all courses = minutes x 60 / seconds_per_review / reviews_per_new_card.
+  A course with a deadline within `cram_days` takes what it needs over the budget; the others share
+  what's left, and a short one is warned with the minutes that would fit it (or, when the urgent
+  courses take the whole budget, the date it frees up).
 - Overdue reviews above the backlog threshold -> no new cards for that course until they're done,
   unless one of its goals is within the cram window.
 - Deadline countdown: new/day = ceil(unseen in scope / (days left - 1)), so every card is seen by the
@@ -106,12 +109,53 @@ def calibrate(state):
     return out
 
 
+def new_cap(minutes, calibration):
+    """New cards/day for all courses that `minutes` of Anki a day leave room for."""
+    return int(minutes * 60 / calibration['seconds_per_review']['value']
+               / calibration['reviews_per_new_card']['value'])
+
+
+def minutes_for(cap, calibration):
+    """The fewest anki_minutes_per_day whose budget is at least `cap` new cards/day."""
+    minutes = math.ceil(cap * calibration['seconds_per_review']['value']
+                        * calibration['reviews_per_new_card']['value'] / 60)
+    while new_cap(minutes, calibration) < cap:  # float rounding
+        minutes += 1
+    return minutes
+
+
+def budget_warning(code, required, granted, claimed, urgent_takes, own_open, total_cap, calibration):
+    """Why a course gets fewer new cards than its deadline needs, and what would change that.
+
+    claimed: new cards/day the courses ahead of it would take with no budget limit.
+    urgent_takes: {course: (new cards/day, deadline)} for the courses within cram_days.
+    own_open: the day this course's own nearest deadline enters cram_days.
+    """
+    minutes = minutes_for(claimed + required, calibration)
+    head = f"{code}: needs {required} new cards/day to finish in time, but "
+    taken = sum(n for n, _ in urgent_takes.values())
+    if taken < total_cap:
+        return head + (f"the daily budget leaves {granted}. Raise anki_minutes_per_day to {minutes} "
+                       f"or cut scope.")
+    hogs = sorted(urgent_takes.items(), key=lambda kv: (kv[1][1], kv[0]))
+    names = ' and '.join(f"{c} ({d.isoformat()})" for c, (_, d) in hogs)
+    free = max(d for _, d in urgent_takes.values()) + datetime.timedelta(days=1)
+    if own_open is not None and own_open < free:
+        until = f"{own_open.isoformat()}, when its own deadline is within cram_days"
+    else:
+        until = f"{free.isoformat()}, when the budget frees up"
+    one = len(hogs) == 1
+    return head + (f"{names} {'is' if one else 'are'} within cram_days of {'its' if one else 'their'} "
+                   f"deadline{'' if one else 's'} and take{'s' if one else ''} {taken} new cards/day, "
+                   f"the whole budget of {total_cap}, so it gets none until {until}. "
+                   f"Fitting it in before then would take anki_minutes_per_day: {minutes}.")
+
+
 def plan(state):
     today = day(state['today'])
     cfg = state['config']
     calibration = calibrate(state)
-    total_cap = int(cfg['anki_minutes_per_day'] * 60 / calibration['seconds_per_review']['value']
-                    / calibration['reviews_per_new_card']['value'])
+    total_cap = new_cap(cfg['anki_minutes_per_day'], calibration)
     horizon = int(cfg['calendar_days'])
     max_lessons = int(cfg['max_lessons_per_day'])
     courses = state.get('courses') or {}
@@ -192,6 +236,8 @@ def plan(state):
         urgency[g['course']] = min(urgency.get(g['course'], 10 ** 6), g['days_left'])
     codes = sorted(set(courses) | {l['course'] for l in lessons}, key=lambda c: (urgency.get(c, 10 ** 6), c))
     remaining_cap = total_cap
+    claimed = 0  # new cards/day the courses so far would take with no budget limit
+    urgent_takes = {}
     for code in codes:
         course = courses.get(code) or {}
         cards = course.get('cards') or []
@@ -221,11 +267,16 @@ def plan(state):
             last_day = [g for g in deadline_goals if g['course'] == code and g['days_left'] <= 1]
             if last_day:
                 new_today = sum(g['required_new_per_day'] for g in last_day[:1])
+            if granted:
+                urgent_takes[code] = (granted, today + datetime.timedelta(days=urgency[code]))
         else:
             granted = min(want, max(remaining_cap, 0))
             if granted < required:
-                warnings.append(f"{code}: needs {required} new cards/day to finish in time, but the daily "
-                                f"budget leaves {granted}. Raise anki_minutes_per_day or cut scope.")
+                own_open = (today + datetime.timedelta(days=urgency[code] - int(cfg['cram_days']))
+                            if code in urgency else None)
+                warnings.append(budget_warning(code, required, granted, claimed, urgent_takes, own_open,
+                                               total_cap, calibration))
+        claimed += want
         remaining_cap -= granted
         course_out[code] = dict(new_per_day=granted, new_today=new_today, overdue=overdue, new_pool=new_pool,
                                 reposition=None)

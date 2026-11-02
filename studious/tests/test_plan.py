@@ -124,6 +124,47 @@ def test_shared_budget_goes_to_the_nearest_deadline():
     assert any('CS4804' in w and 'budget' in w for w in p['warnings'])
 
 
+def test_short_course_is_told_the_minutes_that_fit_it():
+    a = [card(i, goals=['Test2']) for i in range(180)]
+    b = [card(1000 + i, course='CS4804', goals=['Exam2']) for i in range(190)]
+    goals = [goal(date='2026-11-11'), goal('Exam2', 'CS4804', '2026-11-21')]
+    courses = {'CS3214': course(a), 'CS4804': course(b, code='CS4804')}
+    p = planner.plan(state(goals, courses=courses))
+    assert ("CS4804: needs 10 new cards/day to finish in time, but the daily budget leaves 7. "
+            "Raise anki_minutes_per_day to 50 or cut scope.") in p['warnings']
+    raised = planner.plan(state(goals, courses=courses, anki_minutes_per_day=50))
+    assert raised['courses']['CS4804']['new_per_day'] == 10
+    assert not any('CS4804' in w for w in raised['warnings'])
+
+
+def urgent_takes_everything(cmda_date, **cfg):
+    cs = [card(i, goals=['Exam2']) for i in range(201)]
+    cmda = [card(1000 + i, course='CMDA3654', goals=['Quiz3']) for i in range(131)]
+    return planner.plan(state([goal('Exam2', date='2026-11-04'), goal('Quiz3', 'CMDA3654', cmda_date)],
+                              courses={'CS3214': course(cs), 'CMDA3654': course(cmda, code='CMDA3654')},
+                              today='2026-11-02', **cfg))
+
+
+def test_urgent_course_taking_the_whole_budget_is_named_with_its_date():
+    p = urgent_takes_everything('2026-11-06', anki_minutes_per_day=75)  # budget 45
+    assert p['courses']['CS3214']['new_per_day'] == 201  # within cram_days: over the budget
+    assert p['courses']['CMDA3654']['new_per_day'] == 0
+    assert ("CMDA3654: needs 44 new cards/day to finish in time, but CS3214 (2026-11-04) is within "
+            "cram_days of its deadline and takes 201 new cards/day, the whole budget of 45, so it gets none "
+            "until 2026-11-04, when its own deadline is within cram_days. "
+            "Fitting it in before then would take anki_minutes_per_day: 409.") in p['warnings']
+    assert urgent_takes_everything('2026-11-06', anki_minutes_per_day=100)['courses']['CMDA3654']['new_per_day'] == 0
+    assert urgent_takes_everything('2026-11-06', anki_minutes_per_day=408)['courses']['CMDA3654']['new_per_day'] == 43
+    assert urgent_takes_everything('2026-11-06', anki_minutes_per_day=409)['courses']['CMDA3654']['new_per_day'] == 44
+
+
+def test_urgent_course_frees_the_budget_the_day_after_its_deadline():
+    p = urgent_takes_everything('2026-11-20')
+    w = next(w for w in p['warnings'] if w.startswith('CMDA3654'))
+    assert 'until 2026-11-05, when the budget frees up' in w
+    assert 'Raise anki_minutes_per_day to' not in w
+
+
 def test_overlapping_goals_count_the_union_once():
     shared = [card(i, goals=['Test2', 'Final']) for i in range(40)]
     later = [card(100 + i, goals=['Final']) for i in range(60)]
