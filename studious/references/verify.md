@@ -22,6 +22,5 @@ Also check:
 - Code snippets match the course code they cite.
 
 When everything is pass or fixed, set `verified: true` in the lesson's frontmatter and write a short
-report to `studious/runs/<date>-verify-<lesson file name>.md`. Its first line after the title is
-`Lesson: [[courses/<COURSE>/lessons/<NN>-<slug>]]` (a link, so the report shows in the lesson's
-backlinks), then counts of pass/fix/drop and one line per fix or drop.
+report to `studious/runs/<date>-verify-<lesson file name>.md`: the lesson's path (plain text, not a
+link, so reports stay out of the graph), counts of pass/fix/drop, and one line per fix or drop.
