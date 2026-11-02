@@ -1,8 +1,8 @@
 formulas:
-  days_left: 'if(note.date, ((number(date(note.date)) - number(today())) / 86400000).round(), "")'
+  days_left: if(note.date, ((number(date(note.date)) - number(today())) / 86400000).round(), "")
 properties:
   note.title:
-    displayName: Lesson
+    displayName: Title
   note.minutes:
     displayName: Minutes
   formula.days_left:
@@ -17,19 +17,19 @@ views:
         - verified == true
         - done != true
     groupBy:
-      property: note.course
+      property: course
       direction: ASC
     order:
       - file.name
-      - note.title
-      - note.goals
-      - note.minutes
-      - note.done
+      - title
+      - goals
+      - minutes
+      - done
     sort:
       - property: file.name
         direction: ASC
     summaries:
-      note.minutes: Sum
+      minutes: Sum
   - type: table
     name: All lessons
     filters:
@@ -37,20 +37,20 @@ views:
         - file.inFolder("courses")
         - file.path.contains("/lessons/")
     groupBy:
-      property: note.course
+      property: course
       direction: ASC
     order:
       - file.name
-      - note.title
-      - note.goals
-      - note.minutes
-      - note.verified
-      - note.done
+      - title
+      - goals
+      - minutes
+      - verified
+      - done
     sort:
       - property: file.name
         direction: ASC
     summaries:
-      note.minutes: Sum
+      minutes: Sum
   - type: table
     name: Needs checking
     filters:
@@ -60,9 +60,9 @@ views:
         - verified != true
     order:
       - file.name
-      - note.title
-      - note.course
-      - note.goals
+      - title
+      - course
+      - goals
     sort:
       - property: file.name
         direction: ASC
@@ -73,13 +73,13 @@ views:
         - file.inFolder("goals")
     order:
       - file.name
-      - note.title
-      - note.date
+      - title
+      - date
       - formula.days_left
-      - note.status
-      - note.cram
+      - status
+      - cram
     sort:
-      - property: note.date
+      - property: date
         direction: ASC
   - type: table
     name: This goal
@@ -91,12 +91,12 @@ views:
         - goals.contains(this.id)
     order:
       - file.name
-      - note.title
-      - note.minutes
-      - note.verified
-      - note.done
+      - title
+      - minutes
+      - verified
+      - done
     sort:
       - property: file.name
         direction: ASC
     summaries:
-      note.minutes: Sum
+      minutes: Sum
