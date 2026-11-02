@@ -72,6 +72,10 @@ class Run:
         service = self.config.get('obsidian_sync_service')
         if not service:
             return 'not configured'
+        # The service lives on the scheduled machine only; elsewhere the Obsidian app syncs the vault.
+        if not shutil.which('systemctl') or subprocess.run(['systemctl', '--user', 'cat', service],
+                                                            capture_output=True).returncode != 0:
+            return f'{service} is not on this machine (the Obsidian app syncs here)'
         state = subprocess.run(['systemctl', '--user', 'is-active', service], capture_output=True, text=True).stdout.strip()
         if state != 'active':
             raise RuntimeError(f'{service} is {state or "not running"}: the vault may be stale, so nothing was planned')

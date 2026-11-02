@@ -530,7 +530,14 @@ def main(argv=None):
     anki = Anki(port, profile)
     try:
         if args.cmd == 'doctor':
-            path = connectors_dir(clone=True)
+            try:
+                path = connectors_dir(clone=True)
+            except (subprocess.CalledProcessError, OSError) as exc:
+                print(json.dumps(dict(ok=False, checks=[dict(
+                    name='studious-connectors cloned', ok=False, required=True, detail=str(exc),
+                    fix=f'Sign in to GitHub (gh auth login -h github.com), then rerun doctor; or clone '
+                        f'{CONNECTORS_REPO} to {connectors_dir()} yourself')]), indent=2))
+                return 1
             subprocess.run(['git', '-C', str(path), 'pull', '--ff-only', '-q'], check=False)
             result = subprocess.run([sys.executable, str(path / 'doctor.py'), '--json', '--port', str(port)],
                                     capture_output=True, text=True)
