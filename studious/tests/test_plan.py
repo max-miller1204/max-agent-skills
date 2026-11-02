@@ -268,6 +268,28 @@ def test_done_course_gets_no_new_cards():
     assert p['courses']['CS3214']['new_per_day'] == 0 and p['courses']['CS3214']['done']
 
 
+def test_retired_course_is_suspended_and_left_out():
+    cards = [card(1), card(2, type_=2), card(3)]
+    cards[2]['suspended'] = True  # suspended by hand before retiring: not studious's to undo later
+    s = state([goal()], [lesson(1, done=True), lesson(2)], courses={'CS3214': course(cards)})
+    s['config']['courses'] = {'CS3214': {'folders': ['cs3214'], 'retired': True}}
+    p = planner.plan(s)
+    assert p['suspend'] == [1, 2] and p['unsuspend'] == [] and p['retired'] == {'CS3214': [1, 2]}
+    assert p['courses']['CS3214']['retired'] and p['courses']['CS3214']['new_per_day'] == 0
+    assert p['push'] == [] and p['goals'] == [] and not any(d['lessons'] for d in p['days'])
+    assert p['cram_delete'] == ['CS3214 Test2 cram'] and not p['inbox']
+
+
+def test_unretiring_unsuspends_only_what_studious_suspended():
+    cards = [card(1), card(2), card(3)]
+    for c in cards:
+        c['suspended'] = True
+    s = state(courses={'CS3214': course(cards)})
+    s['retired'] = {'CS3214': [1, 2]}
+    p = planner.plan(s)
+    assert p['unsuspend'] == [1, 2] and p['suspend'] == [] and p['retired'] == {}
+
+
 def test_inbox_suggests_done_after_the_final():
     g = goal('Final', date='2026-10-20', title='CS3214 Final Exam')
     p = planner.plan(state([g]))

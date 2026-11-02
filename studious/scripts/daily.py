@@ -174,6 +174,16 @@ class Run:
                 self.client.call('studiousCramDelete', name=name)
             except anki.Refused:
                 pass  # never built
+        if plan['suspend']:
+            self.client.call('studiousSuspend', cardIds=plan['suspend'], suspended=True)
+        if plan['unsuspend']:
+            self.client.call('studiousSuspend', cardIds=plan['unsuspend'], suspended=False)
+        record = self.vault / 'studious/retired.json'
+        if plan['retired'] or record.exists():
+            record.write_text(json.dumps(plan['retired'], indent=1, sort_keys=True) + '\n')
+        if plan['suspend'] or plan['unsuspend']:
+            self.notes.append(f"Retired courses: {len(plan['suspend'])} cards suspended, "
+                              f"{len(plan['unsuspend'])} unsuspended.")
         return 'applied'
 
     def optimize(self):
@@ -193,8 +203,12 @@ class Run:
         status = {(g['course'], g['id']): g for g in plan['goals']}
         written = []
         for goal in state['goals']:
+            path = out / timetable.filename(goal)
+            if plan['courses'].get(goal['course'], {}).get('retired'):
+                if path.exists() and not self.dry_run:
+                    path.unlink()  # a retired course's goals leave the Goals view
+                continue
             if goal.get('status', 'active') == 'active':
-                path = out / timetable.filename(goal)
                 if not self.dry_run:
                     path.write_text(timetable.render(state, goal, status.get((goal['course'], goal['id']))), encoding='utf-8')
                 written.append(path.name)

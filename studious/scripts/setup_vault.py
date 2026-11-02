@@ -54,11 +54,13 @@ The next daily run picks up any change.
 |---|---|---|
 | `courses` | `{}` | One entry per course or track: `CODE: {folders: [path, ...]}`. The code names the Anki deck and tags (`CS3214`, `CS3214::exam::Test2`); the folders (relative to your home folder) are where its sources are. |
 | `courses.CODE.done` | `false` | Set `done: true` when the course is over: no more new cards, and its decks move to the done preset (lower retention, fewer reviews). |
+| `courses.CODE.retired` | `false` | Set `retired: true` to stop seeing the course at all: every run suspends its cards (review history is kept) and leaves its lessons and goals out. Remove it to unsuspend them; cards you suspended yourself stay suspended. |
 
 ```yaml
 courses:
   CS3214: {folders: [cs3214]}
   CS2505: {folders: [cs2505], done: true}
+  CS1114: {folders: [cs1114], retired: true}
 ```
 
 ## Daily workload

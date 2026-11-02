@@ -91,8 +91,10 @@ def main(argv=None):
     vault = Path(args.vault)
     mine = {k: v for k, v in anki.vault_config(vault).items() if v is not None}
     config = {**DEFAULTS, 'vault_name': vault.name, **mine}
+    retired = vault / 'studious/retired.json'  # cards studious suspended for retired courses
     state = dict(today=args.today or datetime.date.today().isoformat(), config=config, config_set=sorted(mine),
-                 goals=goals(vault), lessons=lessons(vault), courses={}, errors=[])
+                 goals=goals(vault), lessons=lessons(vault), courses={}, errors=[],
+                 retired=json.loads(retired.read_text()) if retired.exists() else {})
     client = anki.Anki(int(config.get('anki_port') or 8765), os.environ.get('STUDIOUS_ANKI_PROFILE') or config.get('anki_profile'))
     since = int((time.time() - args.since_days * 86400) * 1000)
     codes = sorted({g['course'] for g in state['goals']} | {l['course'] for l in state['lessons']})

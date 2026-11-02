@@ -44,6 +44,8 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
    - "ingest ~/cs4804/notes/12-naive-bayes.pdf" → Ingest below, for that file;
    - "cram cs3214 test2" → set `cram: true` in that goal;
    - "fix my flagged cards" → Flag and fix below;
+   - "retire CS2505" → `retired: true` under that course in the config; the daily run suspends its cards
+     (never delete a course's deck: the next run would push its cards again);
    - "change my Anki settings" → edit `anki_settings` in the config, then `anki.py settings apply`
      (references/onboarding.md, Anki settings);
    - nothing → ingest what's new (bounded), then the daily steps.
@@ -122,6 +124,7 @@ studious/inbox.md       decisions waiting for the user          courses/<COURSE>
 studious/manifests/     ingested source hashes                  courses/<COURSE>/practice/<NN>-<slug>/
 studious/runs/          run logs, verification reports          timetable/<COURSE>-<id> timetable.md
 studious/calendar.json  managed calendar events                 attachments/
+studious/retired.json   cards suspended for retired courses
 Dashboard.base          lesson and goal views (Obsidian Bases)
 ```
 

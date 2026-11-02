@@ -19,6 +19,9 @@ Rules (Anki and FSRS guidance on workload, plus lesson pacing):
   for lessons, and for the last `cram_days` a filtered deck of its weakest cards is built.
 - A course with new cards but no deadline pressure gets `casual_new_per_day`.
 - A course marked `done: true` in the config gets no new cards (its decks move to the done preset).
+- A course marked `retired: true` drops out of planning (no lessons, pushes, goals or inbox items) and
+  its cards are suspended; the cards studious suspended are recorded (state `retired`), so taking the
+  flag off unsuspends exactly those and leaves cards suspended by hand alone.
 - seconds_per_review and reviews_per_new_card are measured from the last 28 days of reviews once there
   is enough history (see calibrate); values set in the config always win.
 """
@@ -107,7 +110,10 @@ def plan(state):
     horizon = int(cfg['calendar_days'])
     max_lessons = int(cfg['max_lessons_per_day'])
     courses = state.get('courses') or {}
-    lessons = sorted(state.get('lessons') or [], key=lambda l: (l['course'], l['order'], l['path']))
+    course_cfg = cfg.get('courses') or {}
+    retired = {code for code, c in course_cfg.items() if (c or {}).get('retired')}
+    lessons = sorted((l for l in state.get('lessons') or [] if l['course'] not in retired),
+                     key=lambda l: (l['course'], l['order'], l['path']))
     warnings, inbox = [], []
 
     anki_guids = {code: {c['guid'] for c in course.get('cards') or []} for code, course in courses.items()}
@@ -121,6 +127,9 @@ def plan(state):
     cram_delete = []
     for g in sorted(state.get('goals') or [], key=lambda g: (g.get('date') or '9999', g['course'], g['id'])):
         if g.get('status', 'active') != 'active':
+            continue
+        if g['course'] in retired:
+            cram_delete.append(f"{g['course']} {g['id']} cram")
             continue
         days_left = (day(g['date']) - today).days if g.get('date') else None
         if days_left is not None and days_left < 0:
@@ -181,7 +190,11 @@ def plan(state):
     for code in codes:
         course = courses.get(code) or {}
         cards = course.get('cards') or []
-        if ((cfg.get('courses') or {}).get(code) or {}).get('done'):
+        if code in retired:
+            course_out[code] = dict(new_per_day=0, new_today=None, overdue=0, new_pool=0, reposition=None,
+                                    retired=True, done=bool((course_cfg.get(code) or {}).get('done')))
+            continue
+        if (course_cfg.get(code) or {}).get('done'):
             course_out[code] = dict(new_per_day=0, new_today=None, overdue=0, new_pool=0, reposition=None, done=True)
             continue
         today_num = course.get('today')
@@ -332,7 +345,20 @@ def plan(state):
 
     for g in goals_out:
         g.pop('scope_new', None)
-    for code in sorted({g['course'] for g in state.get('goals') or []}):
+    # ---- retired courses: suspend their cards; unsuspend what studious suspended once retired is off ----
+    record = {code: list(ids) for code, ids in (state.get('retired') or {}).items()}
+    suspend, unsuspend = [], []
+    for code in sorted(set(record) | retired):
+        cards = (courses.get(code) or {}).get('cards') or []
+        if code in retired:
+            ids = [c['cardId'] for c in cards if not c['suspended']]
+            suspend += ids
+            record[code] = sorted(set(record.get(code) or []) | set(ids))
+        else:
+            mine = set(record.pop(code))
+            unsuspend += [c['cardId'] for c in cards if c['cardId'] in mine and c['suspended']]
+
+    for code in sorted({g['course'] for g in state.get('goals') or []} - retired):
         mine = [g for g in state.get('goals') or [] if g['course'] == code and g.get('date')]
         finals = [g for g in mine if 'final' in f"{g['id']} {g.get('title', '')}".lower()]
         done = ((cfg.get('courses') or {}).get(code) or {}).get('done')
@@ -342,7 +368,7 @@ def plan(state):
     return dict(today=today.isoformat(), total_new_per_day=total_cap, calibration=calibration,
                 goals=goals_out, courses=course_out,
                 push=push, cram=cram, cram_delete=sorted(set(cram_delete)), days=days,
-                inbox=inbox, warnings=warnings)
+                suspend=suspend, unsuspend=unsuspend, retired=record, inbox=inbox, warnings=warnings)
 
 
 def main(argv=None):

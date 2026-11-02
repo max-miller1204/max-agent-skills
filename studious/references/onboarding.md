@@ -110,7 +110,7 @@ Config keys and defaults:
 | `vault_name` | the vault folder's name | The vault's name in Obsidian, for `obsidian://` links. |
 | `calendar_id` | none | The calendar the daily events go to. Unset: no calendar writes. |
 | `deadline_calendars` | all | Calendar names or ids scanned for exams and deadlines. |
-| `courses` | `{}` | `CODE: {folders: [path, ...]}`; add `done: true` when the course is over (no new cards, done preset). |
+| `courses` | `{}` | `CODE: {folders: [path, ...]}`; add `done: true` when the course is over (no new cards, done preset), or `retired: true` to suspend all its cards and leave it out of planning (remove it to unsuspend). |
 | `anki_minutes_per_day` | 45 | Review time for all courses; new cards/day = minutes × 60 ÷ `seconds_per_review` ÷ `reviews_per_new_card`. |
 | `seconds_per_review` | measured, else 10 | Measured from the last 28 days once there are 100 answers. Setting it fixes the value. |
 | `reviews_per_new_card` | measured, else 10 | Each new card a day turns into about this many reviews a day. Measured once the review log spans 56 days, clamped to 4-20. Setting it fixes the value. |
