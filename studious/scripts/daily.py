@@ -138,7 +138,11 @@ class Run:
         if self.dry_run:
             return 'dry run'
         done = any(c.get('done') for c in plan['courses'].values())
-        payload = anki.settings_payload(self.config, plan['total_new_per_day'], done=done)
+        # The preset's new cards/day also caps each lesson subdeck, so it must cover the largest course
+        # limit (a cram day can go over the all-course budget).
+        cap = max([plan['total_new_per_day']] + [max(c['new_per_day'], c['new_today'] or 0)
+                                                for c in plan['courses'].values()])
+        payload = anki.settings_payload(self.config, cap, done=done)
         result = self.client.call('studiousApplySettings', settings=payload)
         reset = [c['field'] for c in result['changes'] if c['field'] not in ('new.perDay', 'name', None)]
         if reset:

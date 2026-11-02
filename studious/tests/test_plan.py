@@ -164,7 +164,7 @@ def test_event_text_format():
     d = p['days'][0]
     assert d['title'] == '[studious] Daily quota: 15 cards · 1 lesson'  # 10 new + 5 due
     assert d['description'].split('\n')[:3] == ['Today', '• Anki: 15 cards', '• Lesson: conditionvariables']
-    assert 'obsidian://open?vault=vault&file=courses%2FCS3214%2Flessons%2F07-l7' in d['description']
+    assert 'obsidian://' not in d['description']
     empty = p['days'][-1]
     assert '• Lesson: none' in empty['description'] and empty['title'].endswith('· 0 lessons')
 

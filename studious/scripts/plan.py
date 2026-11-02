@@ -27,7 +27,6 @@ import datetime
 import json
 import math
 import sys
-from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -48,11 +47,6 @@ def in_scope(card, goal):
 
 def plural(n, word):
     return f"{n} {word}{'' if n == 1 else 's'}"
-
-
-def obsidian_link(vault_name, path):
-    file = path[:-3] if path.endswith('.md') else path
-    return f"obsidian://open?vault={quote(vault_name)}&file={quote(file, safe='')}"
 
 
 CALIBRATION_DAYS = 28
@@ -332,9 +326,6 @@ def plan(state):
                 lines.append(f"• Cram: {g['course']} {g['id']} ({'today' if left == 0 else plural(left, 'day') + ' left'})")
         if k == 0 and inbox:
             lines.append(f"• Inbox: {plural(len(inbox), 'decision')}")
-        if todays:
-            lines.append('')
-            lines += [f"{l['title']}: {obsidian_link(cfg['vault_name'], l['path'])}" for l in todays]
         days.append(dict(date=date.isoformat(), weekday=WEEKDAYS[date.weekday()], new=new, due=due, cards=cards_total,
                          lessons=[dict(title=l['title'], path=l['path']) for l in todays],
                          title=title, description='\n'.join(lines)))
