@@ -21,5 +21,7 @@ Also check:
 - Every card has a `Source`, one objective, and the right note type for its answer.
 - Code snippets match the course code they cite.
 
-When everything is pass or fixed, set `verified: true` in the lesson's frontmatter and append a
-short report to the run log: counts of pass/fix/drop and one line per fix or drop.
+When everything is pass or fixed, set `verified: true` in the lesson's frontmatter and write a short
+report to `studious/runs/<date>-verify-<lesson file name>.md`. Its first line after the title is
+`Lesson: [[courses/<COURSE>/lessons/<NN>-<slug>]]` (a link, so the report shows in the lesson's
+backlinks), then counts of pass/fix/drop and one line per fix or drop.

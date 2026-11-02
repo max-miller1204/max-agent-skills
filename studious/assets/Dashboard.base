@@ -1,0 +1,102 @@
+formulas:
+  days_left: 'if(note.date, ((number(date(note.date)) - number(today())) / 86400000).round(), "")'
+properties:
+  note.title:
+    displayName: Lesson
+  note.minutes:
+    displayName: Minutes
+  formula.days_left:
+    displayName: Days left
+views:
+  - type: table
+    name: To read
+    filters:
+      and:
+        - file.inFolder("courses")
+        - file.path.contains("/lessons/")
+        - verified == true
+        - done != true
+    groupBy:
+      property: note.course
+      direction: ASC
+    order:
+      - file.name
+      - note.title
+      - note.goals
+      - note.minutes
+      - note.done
+    sort:
+      - property: file.name
+        direction: ASC
+    summaries:
+      note.minutes: Sum
+  - type: table
+    name: All lessons
+    filters:
+      and:
+        - file.inFolder("courses")
+        - file.path.contains("/lessons/")
+    groupBy:
+      property: note.course
+      direction: ASC
+    order:
+      - file.name
+      - note.title
+      - note.goals
+      - note.minutes
+      - note.verified
+      - note.done
+    sort:
+      - property: file.name
+        direction: ASC
+    summaries:
+      note.minutes: Sum
+  - type: table
+    name: Needs checking
+    filters:
+      and:
+        - file.inFolder("courses")
+        - file.path.contains("/lessons/")
+        - verified != true
+    order:
+      - file.name
+      - note.title
+      - note.course
+      - note.goals
+    sort:
+      - property: file.name
+        direction: ASC
+  - type: table
+    name: Goals
+    filters:
+      and:
+        - file.inFolder("goals")
+    order:
+      - file.name
+      - note.title
+      - note.date
+      - formula.days_left
+      - note.status
+      - note.cram
+    sort:
+      - property: note.date
+        direction: ASC
+  - type: table
+    name: This goal
+    filters:
+      and:
+        - file.inFolder("courses")
+        - file.path.contains("/lessons/")
+        - course == this.course
+        - goals.contains(this.id)
+    order:
+      - file.name
+      - note.title
+      - note.minutes
+      - note.verified
+      - note.done
+    sort:
+      - property: file.name
+        direction: ASC
+    summaries:
+      note.minutes: Sum

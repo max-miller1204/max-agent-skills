@@ -99,7 +99,14 @@ def render(state, goal):
     head = ''.join(f'<th>{d.strftime("%b")} {d.day}</th>' for d in dates)
     table = ('<table>\n<tr><th>Topic</th><th>Lesson</th><th>Now</th>' + head + '</tr>\n'
              + '\n'.join(rows) + '\n</table>') if rows else '*No cards or lessons in scope yet.*'
-    return (f"---\ntype: timetable\ngoal: {goal['id']}\ncourse: {goal['course']}\nupdated: {state['today']}\n---\n"
+    # Links in properties count as links in Obsidian, so lessons show this timetable in their backlinks.
+    def link(path, title):
+        return json.dumps(f"[[{path[:-3]}|{title}]]", ensure_ascii=False)
+    in_scope = sorted(lessons.values(), key=lambda l: l['order'])
+    links = ''.join(f"\n  - {link(l['path'], l['title'])}" for l in in_scope)
+    goal_link = f"\ngoal_note: {link(goal['path'], goal['title'])}" if goal.get('path') else ''
+    return (f"---\ntype: timetable\ngoal: {goal['id']}\ncourse: {goal['course']}{goal_link}\n"
+            f"lessons:{links or ' []'}\nupdated: {state['today']}\n---\n"
             f"# {goal['title']}{when}\n\n"
             "> [!info]- How to read this\n"
             "> **Now**: FSRS recall estimate today for the topic's reviewed cards, then seen/total cards. "

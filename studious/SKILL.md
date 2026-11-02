@@ -87,12 +87,20 @@ calendar_event_id: abc123 # the adopted calendar event, when there is one
 status: active            # active | done | archived
 cram: false               # true forces cram mode
 ---
+# CS4804 Exam 2
+
+One or two lines: format, scope, where the review guide is.
+
+## Lessons
+
+![[Dashboard.base#This goal]]
 ```
 
 Scope: by default every lesson of the course whose lecture comes before the date; a review guide
 narrows it. Put the goal id in each in-scope lesson's `goals`; the daily run retags the cards. A
 goal whose material doesn't exist yet stays active and fills in as you ingest. Creating a goal
-never creates a calendar event; the daily quota events are the only ones studious writes.
+never creates a calendar event; the daily quota events are the only ones studious writes. The
+`## Lessons` embed lists the goal's lessons with their minutes and checkboxes.
 
 ## Flag and fix
 
@@ -121,6 +129,7 @@ studious/inbox.md       decisions waiting for the user          courses/<COURSE>
 studious/manifests/     ingested source hashes                  courses/<COURSE>/practice/<NN>-<slug>/
 studious/runs/          run logs, verification reports          timetable/<COURSE>-<id>.md
 studious/calendar.json  managed calendar events                 attachments/
+Dashboard.base          lesson and goal views (Obsidian Bases)
 ```
 
 Scripts: `anki.py` (Anki), `snapshot.py` → `plan.py` (pure planner) → `timetable.py`,

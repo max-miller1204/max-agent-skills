@@ -3,7 +3,7 @@
 
     python3 setup_vault.py [--vault DIR]
 
-Creates the folders, a config.md template (only if missing), the Obsidian CSS snippet for card and
+Creates the folders, a config.md template and the Dashboard.base lesson and goal views (only if missing), the Obsidian CSS snippet for card and
 supplementary callouts (enabled in appearance.json, other settings kept), .gitignore entries, and a
 local git repository (no remote) used as an undo log. Prints what it did as JSON.
 """
@@ -163,6 +163,10 @@ def main(argv=None):
     if not config.exists():
         config.write_text(CONFIG, encoding='utf-8')
         done.append('created studious/config.md (template)')
+    dashboard = vault / 'Dashboard.base'
+    if not dashboard.exists():
+        dashboard.write_text((Path(__file__).resolve().parent.parent / 'assets/Dashboard.base').read_text(), encoding='utf-8')
+        done.append('created Dashboard.base')
     inbox = vault / 'studious/inbox.md'
     if not inbox.exists():
         inbox.write_text('# Inbox\n\nNothing needs you.\n', encoding='utf-8')

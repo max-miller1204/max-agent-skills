@@ -210,6 +210,7 @@ def test_timetable_rows_now_and_sessions():
     assert 'unseen · 0/1' in md
     assert '<th>Oct 30</th>' in md and '>50%<' in md  # one Again out of two reviews
     assert '✓' in md
+    assert '"[[courses/CS3214/lessons/01-l1|lesson1]]"' in md and 'goal_note: "[[goals/CS3214-Test2|' in md
 
 
 def revlog(n_cards, per_card, days, ms=6000, start='2026-11-01'):
