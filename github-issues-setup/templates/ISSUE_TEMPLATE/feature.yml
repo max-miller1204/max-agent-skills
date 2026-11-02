@@ -1,7 +1,6 @@
 name: Feature
 description: A new capability.
-labels: [feature]
-projects: ["__PROJECT__"]
+labels: [feature, triage]
 body:
   - type: textarea
     id: problem

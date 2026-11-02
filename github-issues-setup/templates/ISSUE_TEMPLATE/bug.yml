@@ -1,7 +1,6 @@
 name: Bug
 description: Something is broken or behaves incorrectly.
-labels: [bug]
-projects: ["__PROJECT__"]
+labels: [bug, triage]
 body:
   - type: textarea
     id: what

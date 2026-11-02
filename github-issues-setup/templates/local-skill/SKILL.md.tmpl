@@ -1,0 +1,132 @@
+---
+name: __SKILL_NAME__
+description: >-
+  Linear-style issue workflow for __REPO__ on plain GitHub Issues: triage new
+  issues, file issues with type and priority, pick what is next, start and
+  finish work, block and unblock, group work into projects, find stale issues,
+  and log what got done. Use when the user asks to triage, file an issue,
+  decide what is next, start or close an issue, update a project, or see what
+  got done.
+---
+# __REPO__ issues
+
+Everything is native GitHub Issues, driven with `gh`. Run commands with `-R __REPO__` (shown as `-R $R` below, with `R=__REPO__`).
+
+## Model
+
+| Linear | Here |
+|---|---|
+| Triage | open, labeled `triage` (issue forms add it) |
+| Backlog | open, not assigned |
+| In Progress | open, assigned |
+| In Review | open, and an open PR closes it (`Fixes #N`) |
+| Done | closed as completed |
+| Canceled | closed as not planned |
+| Duplicate | closed as duplicate |
+| Type | label: `bug`, `feature`, `chore` |
+| Priority | label: `urgent`, `high`, `medium`, `low`. At most one. No label means no priority |
+| Project | parent issue labeled `project`, with native sub-issues. Progress = sub-issues done |
+| Blocked by | native issue dependencies |
+
+There are no cycles and no estimates. Milestones exist if the user wants them, but nothing here manages them.
+
+When you change an issue's priority, remove the old priority label in the same command, for example `gh issue edit N -R $R --remove-label high --add-label urgent`.
+
+## Triage
+
+```
+gh issue list -R $R --label triage --json number,title,labels,createdAt,url \
+  --jq 'sort_by(.createdAt)[] | "#\(.number)\t\(.title)\t\([.labels[].name] | join(","))"'
+```
+
+For each issue, read it (`gh issue view N -R $R`), propose a type and priority, and ask the user. Go one at a time unless the user wants a batch. Then:
+
+- Accept: `gh issue edit N -R $R --remove-label triage --add-label high` (plus the type label if it is missing).
+- Decline: `gh issue close N -R $R --reason "not planned" --comment "Declined: REASON"`.
+- Duplicate: `gh issue close N -R $R --duplicate-of M`.
+
+End with how many you accepted, declined, and closed as duplicate.
+
+## Create
+
+Ask only for what is missing. The type comes from context. Issues filed here skip triage, because the user is filing them on purpose.
+
+```
+gh issue create -R $R --title "..." --body "..." --label feature --label high \
+  [--parent P] [--blocked-by 3,5] [--assignee @me]
+```
+
+When you file a batch of related issues, create the blockers first so you can reference them. Report the URLs.
+
+## Next
+
+```
+gh issue list -R $R --state open --limit 500 \
+  --json number,title,labels,assignees,blockedBy,createdAt \
+  --jq '
+    def prio: ([.labels[].name] as $l | ["urgent","high","medium","low"] | map(. as $p | $l | index($p)) | to_entries | map(select(.value != null)) | .[0].key // 4);
+    def open_blockers: [.blockedBy.nodes[]? | select(.state == "OPEN") | "#\(.number)"];
+    [.[] | select([.labels[].name] | (index("triage") or index("project")) | not)]
+    | map(. + {p: prio, b: open_blockers})
+    | (map(select(.assignees | length > 0)) | "## Now", (.[] | "#\(.number)\t\(.title)\t@\(.assignees[0].login)")),
+      (map(select((.assignees | length == 0) and (.b | length == 0))) | sort_by(.p, .createdAt) | .[:5] | "## Next", (.[] | "#\(.number)\t\(.title)\t\(["urgent","high","medium","low","-"][.p])")),
+      (map(select((.assignees | length == 0) and (.b | length > 0))) | sort_by(.p, .createdAt) | "## Blocked", (.[] | "#\(.number)\t\(.title)\twaits on \(.b | join(", "))"))'
+```
+
+To mark which Now issues are in review, check `gh pr list -R $R --json number,closingIssuesReferences --jq '.[] | "PR #\(.number) closes \([.closingIssuesReferences[].number] | map("#\(.)") | join(", "))"'`.
+
+Suggest the top Next issue. If a blocked issue ranks higher, say what it waits on, and suggest its blockers first.
+
+## Start and finish
+
+- Start: `gh issue edit N -R $R --add-assignee @me`. Suggest a branch named `N-short-slug` and a PR body with `Fixes #N`, so merging closes the issue.
+- Done without a PR: `gh issue close N -R $R --reason completed`.
+- Put back in the backlog: `gh issue edit N -R $R --remove-assignee @me`.
+
+## Block and unblock
+
+- `gh issue edit N -R $R --add-blocked-by 3,5`
+- `gh issue edit N -R $R --remove-blocked-by 3`
+
+A closed blocker no longer blocks.
+
+## Projects
+
+- Create: `gh issue create -R $R --title "..." --body "Goal and scope" --label project --assignee LEAD`.
+- Add work: `gh issue edit P -R $R --add-sub-issue 12,13`, or create the child with `--parent P`.
+- Progress:
+
+```
+gh issue list -R $R --state open --label project --json number,title,assignees,subIssuesSummary \
+  --jq '.[] | "#\(.number)\t\(.title)\t\(.subIssuesSummary.completed)/\(.subIssuesSummary.total) done\t@\(.assignees[0].login // "-")"'
+```
+
+Close a project issue (`--reason completed`) when its work is done.
+
+## Stale
+
+Open issues with no activity for 60 days:
+
+```
+gh issue list -R $R --state open --search "updated:<$(date -v-60d +%F 2>/dev/null || date -d '60 days ago' +%F)" \
+  --json number,title,updatedAt --jq '.[] | "#\(.number)\t\(.title)\tlast touched \(.updatedAt[:10])"'
+```
+
+For each one, suggest keep, reprioritize, or decline. Ask before you change anything.
+
+## Log
+
+What got done in the last N days (default 7):
+
+```
+gh issue list -R $R --state closed --limit 200 --search "closed:>=$(date -v-7d +%F 2>/dev/null || date -d '7 days ago' +%F) reason:completed" \
+  --json number,title,labels,closedAt --jq 'sort_by(.closedAt)[] | "\(.closedAt[:10])\t#\(.number)\t\(.title)"'
+```
+
+Summarize it in a few lines grouped by type or project. It is a log, not a status report: no deadlines or at-risk language.
+
+## Rules
+
+- Ask before you close, decline, or bulk-edit issues.
+- Keep at most one priority label on an issue.
+- Re-run the setup (`github-issues-setup`) to repair labels or issue forms. It overwrites this file.
