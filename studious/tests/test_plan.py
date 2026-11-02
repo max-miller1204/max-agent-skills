@@ -211,6 +211,7 @@ def test_timetable_rows_now_and_sessions():
     assert '<th>Oct 30</th>' in md and '>50%<' in md  # one Again out of two reviews
     assert '✓' in md
     assert 'cram:' not in md  # no plan, no verdict
+    assert timetable.filename(s['goals'][0]) == 'CS3214-Test2 timetable.md'  # not the goal note's name
     p = planner.plan(s)
     md = timetable.render(s, s['goals'][0], p['goals'][0])
     assert 'cram: false' in md and 'lessons_left: 1' in md and 'minutes_left: 40' in md and 'date: 2026-11-11' in md

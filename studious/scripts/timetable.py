@@ -3,7 +3,7 @@
 
     python3 timetable.py state.json [--vault DIR]
 
-Writes <vault>/timetable/<course>-<goal>.md. Rows are the goal's topics (lesson subdecks).
+Writes <vault>/timetable/<course>-<goal> timetable.md. Rows are the goal's topics (lesson subdecks).
 - "Now" is the mean FSRS retrievability of the topic's reviewed cards today, with seen/total counts.
   Unseen cards are counted, never averaged in.
 - Each date column is a day you reviewed that topic, colored by how that session went: the share
@@ -42,6 +42,11 @@ def cell(text, color, title=''):
 def review_day(ms, tz):
     # Anki's day rolls over at 4am; a 1am review counts for the day before.
     return (datetime.datetime.fromtimestamp(ms / 1000, tz) - datetime.timedelta(hours=4)).date()
+
+
+def filename(goal):
+    """Not the goal note's own name, so the two are separate nodes in Obsidian's graph."""
+    return f"{goal['course']}-{goal['id']} timetable.md"
 
 
 def render(state, goal, planned=None):
@@ -142,7 +147,7 @@ def main(argv=None):
     for goal in state['goals']:
         if goal.get('status', 'active') != 'active':
             continue
-        path = out_dir / f"{goal['course']}-{goal['id']}.md"
+        path = out_dir / filename(goal)
         path.write_text(render(state, goal, status.get((goal['course'], goal['id']))), encoding='utf-8')
         written.append(str(path))
     print(json.dumps(written, indent=2))

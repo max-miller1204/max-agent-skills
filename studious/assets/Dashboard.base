@@ -40,6 +40,7 @@ views:
         direction: ASC
     summaries:
       minutes: Sum
+    columnSize: {}
   - type: table
     name: All lessons
     filters:
@@ -92,22 +93,4 @@ views:
     sort:
       - property: date
         direction: ASC
-  - type: table
-    name: This goal
-    filters:
-      and:
-        - file.inFolder("courses")
-        - file.path.contains("/lessons/")
-        - course == this.course
-        - goals.contains(this.id)
-    order:
-      - file.name
-      - title
-      - minutes
-      - verified
-      - done
-    sort:
-      - property: file.name
-        direction: ASC
-    summaries:
-      minutes: Sum
+    columnSize: {}

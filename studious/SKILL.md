@@ -73,7 +73,8 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
 
 ## Goals
 
-`goals/<COURSE>-<id>.md`:
+`goals/<COURSE>-<id>.md`, copied from `assets/goal.md` (its `## Lessons` table lists the goal's
+lessons with their minutes and checkboxes; keep it as is). The properties:
 
 ```yaml
 ---
@@ -87,20 +88,12 @@ calendar_event_id: abc123 # the adopted calendar event, when there is one
 status: active            # active | done | archived
 cram: false               # true forces cram mode; the planner's own verdict is in the timetable
 ---
-# CS4804 Exam 2
-
-One or two lines: format, scope, where the review guide is.
-
-## Lessons
-
-![[Dashboard.base#This goal]]
 ```
 
 Scope: by default every lesson of the course whose lecture comes before the date; a review guide
 narrows it. Put the goal id in each in-scope lesson's `goals`; the daily run retags the cards. A
 goal whose material doesn't exist yet stays active and fills in as you ingest. Creating a goal
-never creates a calendar event; the daily quota events are the only ones studious writes. The
-`## Lessons` embed lists the goal's lessons with their minutes and checkboxes.
+never creates a calendar event; the daily quota events are the only ones studious writes.
 
 ## Flag and fix
 
@@ -127,7 +120,7 @@ against the source, push the lesson (updates keep review history), then clear th
 studious/config.md      settings (references/onboarding.md)    goals/<COURSE>-<id>.md
 studious/inbox.md       decisions waiting for the user          courses/<COURSE>/lessons/<NN>-<slug>.md
 studious/manifests/     ingested source hashes                  courses/<COURSE>/practice/<NN>-<slug>/
-studious/runs/          run logs, verification reports          timetable/<COURSE>-<id>.md
+studious/runs/          run logs, verification reports          timetable/<COURSE>-<id> timetable.md
 studious/calendar.json  managed calendar events                 attachments/
 Dashboard.base          lesson and goal views (Obsidian Bases)
 ```

@@ -194,7 +194,7 @@ class Run:
         written = []
         for goal in state['goals']:
             if goal.get('status', 'active') == 'active':
-                path = out / f"{goal['course']}-{goal['id']}.md"
+                path = out / timetable.filename(goal)
                 if not self.dry_run:
                     path.write_text(timetable.render(state, goal, status.get((goal['course'], goal['id']))), encoding='utf-8')
                 written.append(path.name)
