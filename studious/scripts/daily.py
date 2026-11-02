@@ -136,10 +136,11 @@ class Run:
     def apply(self, plan):
         if self.dry_run:
             return 'dry run'
+        options = {**snapshot.DEFAULTS['anki_preset'], **(self.config.get('anki_preset') or {})}
         for code, c in plan['courses'].items():
             try:
                 self.client.call('studiousSetLimits', root=code, newPerDay=c['new_per_day'], newToday=c['new_today'],
-                                 gatherByPosition=True)
+                                 gatherByPosition=True, options=options)
             except anki.Refused as exc:
                 if 'does not exist' in str(exc):
                     continue  # no cards for this course yet
@@ -228,7 +229,7 @@ class StopRun(Exception):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'vault')))
+    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'studious')))
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--no-calendar', action='store_true')
     args = parser.parse_args(argv)

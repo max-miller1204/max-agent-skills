@@ -17,7 +17,7 @@ client in production, sign-in, the Studious calendar).
 
 ## 2. Vault
 
-The vault is `~/vault` unless the user wants it elsewhere (then they set `STUDIOUS_VAULT` in their
+The vault is `~/studious` unless the user wants it elsewhere (then they set `STUDIOUS_VAULT` in their
 shell profile and in the scheduler). Create or repair it:
 
 ```bash
@@ -33,29 +33,32 @@ Then sync, one method per device (never the desktop app's Sync and Headless on t
 
 Headless setup (needs an Obsidian Sync subscription and Node 22+):
 
+`ob` needs its SQLite module built, and mise's npm installs skip build scripts unless allowed. With
+mise (the dots setup), put this line under `[tools]` in `~/.config/mise/config.toml`, run
+`mise install`, and persist it with `dots config import mise/config.toml`:
+
+```toml
+"npm:obsidian-headless" = { version = "latest", allow_builds = ["better-sqlite3"] }
+```
+
+Without mise: `npm install -g obsidian-headless`. Then:
+
 ```bash
-dots pkg add npm:obsidian-headless       # or: npm install -g obsidian-headless
 ob login
-ob sync-create-remote --name vault --encryption standard   # first device only; others: ob sync-list-remote
-ob sync-setup --vault <id from the line above> --path ~/vault --device-name "$(hostname)"
-ob sync-config --path ~/vault --file-types image,pdf,unsupported --excluded-folders studious/cache \
+ob sync-create-remote --name studious --encryption standard   # first device only; others: ob sync-list-remote
+ob sync-setup --vault <id from the line above> --path ~/studious --device-name "$(hostname)"
+ob sync-config --path ~/studious --file-types image,pdf,unsupported --excluded-folders studious/cache \
   --configs appearance,appearance-data
-ob sync --path ~/vault                    # first sync, watch it finish
+ob sync --path ~/studious                    # first sync, watch it finish
 ```
 
 `unsupported` makes JSON and code files sync too (manifests, the calendar record, practice code).
 `appearance-data` carries the callout CSS snippet to the other devices. Dot-folders such as `.git`
 never sync, so each machine keeps its own undo log.
 
-If `ob sync-config` fails with "Could not locate the bindings file" (mise installs skip native
-builds), fetch the prebuilt SQLite module and retry:
-
-```bash
-cd "$(dirname "$(find ~/.local/share/mise/installs/npm-obsidian-headless -path '*node_modules/better-sqlite3/package.json' | head -1)")"
-npx --yes prebuild-install@7
-```
-
-An upgrade of `obsidian-headless` needs this again.
+A remote vault can't be renamed, and Obsidian Sync Standard allows one remote: to rename, delete
+the old remote in the Obsidian app (Settings, Sync, Manage), then `ob sync-unlink`, create the new
+remote, and `sync-setup` again.
 
 Run it continuously:
 
@@ -104,7 +107,7 @@ Config keys and defaults:
 | `anki_port` | 8765 | AnkiConnect port. |
 | `anki_launch_command` | `anki -p {profile}` (Linux), `open -g -a Anki --args -p {profile}` (Mac) | How the daily run starts Anki. |
 | `timezone` | America/New_York | For review dates in the timetable. |
-| `vault_name` | vault | The vault's name in Obsidian, for `obsidian://` links. |
+| `vault_name` | the vault folder's name | The vault's name in Obsidian, for `obsidian://` links. |
 | `calendar_id` | none | The calendar the daily events go to. Unset: no calendar writes. |
 | `deadline_calendars` | all | Calendar names or ids scanned for exams and deadlines. |
 | `courses` | `{}` | `CODE: {folders: [path, ...]}` |
@@ -120,6 +123,20 @@ Config keys and defaults:
 | `calendar_days` | 7 | Days of events written ahead. |
 | `rag_green`, `rag_amber` | 0.90, 0.75 | Timetable color thresholds. |
 | `obsidian_sync_service` | none | systemd user service the daily run checks first. |
+| `anki_preset` | see below | Fields of each course's `studious::<COURSE>` preset, by dotted name. A key here overrides just that one. |
+
+Each daily run resets these fields of every `studious::<COURSE>` preset, so change them in the
+config, not in Anki's deck options. The defaults follow the user's anki-settings rules:
+`desiredRetention` 0.9, `new.delays` and `lapse.delays` `[15]` (one same-day step with FSRS),
+`rev.perDay` 9999 (never hide due reviews; new cards set the workload), `new.bury`, `rev.bury` and
+`buryInterdayLearning` true, `lapse.leechFails` 8 with `lapse.leechAction` 1 (tag only), `maxTaken`
+360. The patch also accepts `newSortOrder`, `newMix`, `interdayLearningMix` and `reviewOrder`.
+New cards/day and the gather order (by position, so studious decides what comes first) aren't
+settable: the planner owns them. FSRS itself is a collection setting the user turns on.
+
+Anki's own `Default` preset and `Default` deck can't be deleted (the deck hides once it's empty and
+other decks exist). Deleting any other preset is a schema change that forces a one-way full sync,
+so leave unused presets alone unless the user wants to sync that way.
 
 Show the user the final config, then commit the vault.
 
@@ -145,7 +162,7 @@ Use the studious skill in daily mode: run `uv run ~/.agents/skills/studious/scri
 ```
 
 Another scheduler works the same way: it only needs to run that command (with `STUDIOUS_VAULT` if
-the vault isn't `~/vault`) in the user's desktop session, so Anki can start if it's closed. Never
+the vault isn't `~/studious`) in the user's desktop session, so Anki can start if it's closed. Never
 publish the vault's git repository from the scheduler's UI.
 
 ## 6. Switching to the real Anki profile
@@ -157,7 +174,7 @@ When the user is happy with the lessons and cards from the `testing` profile:
 2. Set `anki_profile` to that profile's name.
 3. `uv run scripts/anki.py ensure-note-types` (creates Code+ and updates the shared styling).
 4. Push the lessons already marked done into the real collection:
-   `uv run scripts/anki.py push ~/vault/courses` (lessons not done stay held, as always).
+   `uv run scripts/anki.py push ~/studious/courses` (lessons not done stay held, as always).
 5. `uv run scripts/daily.py`, then check the event and the deck options in Anki.
 
 The test profile can stay as it is; nothing writes to it once the config points elsewhere.
@@ -168,6 +185,6 @@ The test profile can stay as it is; nothing writes to it once the config points 
 2. `uv run ~/.agents/skills/studious/scripts/anki.py doctor` and follow its fixes: AnkiConnect
    (add-on `2055492159`), `python3 ~/.local/share/studious/connectors/anki/apply.py`, restart Anki,
    then `scp -r max-desktop:.config/studious ~/.config/studious` and `google-calendar-mcp` installed.
-3. Obsidian app with Sync, connected to the remote vault at `~/vault`.
+3. Obsidian app with Sync, connected to the remote vault at `~/studious`.
 4. No schedule here: interactive `/studious` only. Its closing daily run still updates the calendar;
    the calendar record syncs with the vault and existing events are adopted, so nothing is duplicated.

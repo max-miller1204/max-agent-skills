@@ -118,7 +118,7 @@ def main(argv=None):
     parser.add_argument('--lesson')
     parser.add_argument('--under', help='only files under this path (relative to home)')
     parser.add_argument('--list', action='store_true', help='list every file instead of a per-folder summary')
-    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'vault')))
+    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'studious')))
     a = parser.parse_args(argv)
     vault = Path(a.vault)
     courses = read_config(vault).get('courses') or {}

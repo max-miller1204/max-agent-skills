@@ -407,7 +407,7 @@ def find_card(vault, guid):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='studious <-> Anki')
-    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'vault')))
+    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'studious')))
     parser.add_argument('--profile')
     parser.add_argument('--port', type=int)
     sub = parser.add_subparsers(dest='cmd', required=True)

@@ -268,7 +268,7 @@ def main(argv=None):
     parser.add_argument('plan', nargs='?')
     parser.add_argument('--calendar')
     parser.add_argument('--days', type=int, default=120)
-    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'vault')))
+    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'studious')))
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
     try:

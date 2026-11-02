@@ -36,7 +36,20 @@ DEFAULTS = {
     'budget_new_per_day': 10,      # self-paced budgeted goals
     'backlog_overdue_threshold': 0,  # overdue reviews above this -> no new cards for that course
     'calendar_days': 7,
-    'vault_name': 'vault',
+    # Course preset fields daily.py keeps set (the user's anki-settings rules). A config
+    # `anki_preset` overrides single keys; new cards/day and gather order come from the plan.
+    'anki_preset': {
+        'desiredRetention': 0.9,
+        'new.delays': [15],          # one short FSRS step, finished the same day
+        'lapse.delays': [15],
+        'rev.perDay': 9999,          # never hide due reviews; new cards set the workload
+        'new.bury': True,
+        'rev.bury': True,
+        'buryInterdayLearning': True,
+        'lapse.leechFails': 8,
+        'lapse.leechAction': 1,      # tag only
+        'maxTaken': 360,
+    },
 }
 
 
@@ -84,13 +97,14 @@ def goals(vault):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'vault')))
+    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'studious')))
     parser.add_argument('--today', help='YYYY-MM-DD (default: today)')
     parser.add_argument('--since-days', type=int, default=120)
     parser.add_argument('--out')
     args = parser.parse_args(argv)
     vault = Path(args.vault)
-    config = {**DEFAULTS, **{k: v for k, v in anki.vault_config(vault).items() if v is not None}}
+    config = {**DEFAULTS, 'vault_name': vault.name,
+              **{k: v for k, v in anki.vault_config(vault).items() if v is not None}}
     state = dict(today=args.today or datetime.date.today().isoformat(), config=config,
                  goals=goals(vault), lessons=lessons(vault), courses={}, errors=[])
     client = anki.Anki(int(config.get('anki_port') or 8765), os.environ.get('STUDIOUS_ANKI_PROFILE') or config.get('anki_profile'))

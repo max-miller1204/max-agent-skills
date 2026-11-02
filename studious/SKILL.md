@@ -10,7 +10,7 @@ them into lessons in an Obsidian vault and cards in Anki, and keep a daily quota
 Scripts do everything that must be exact; you do the reading, teaching and judgment.
 
 Run scripts with `uv run <skill dir>/scripts/<name>.py` (they carry their own dependencies). Every
-script prints JSON. Paths below are relative to the vault (`~/vault` unless `STUDIOUS_VAULT` is set).
+script prints JSON. Paths below are relative to the vault (`~/studious` unless `STUDIOUS_VAULT` is set).
 
 ## Modes
 

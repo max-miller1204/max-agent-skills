@@ -71,7 +71,7 @@ def render(state, goal):
     days_left = (datetime.date.fromisoformat(goal['date']) - today).days if goal.get('date') else None
     left = 'today' if days_left == 0 else f"{days_left} day{'' if days_left == 1 else 's'} left"
     when = f" · {goal['date']} ({left})" if days_left is not None else ''
-    vault = cfg.get('vault_name', 'vault')
+    vault = cfg.get('vault_name', 'studious')
     rows = []
     for deck in decks:
         mine = [c for c in cards if c['deck'] == deck]
@@ -111,7 +111,7 @@ def render(state, goal):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('state')
-    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'vault')))
+    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'studious')))
     args = parser.parse_args(argv)
     with open(args.state, encoding='utf-8') as f:
         state = json.load(f)

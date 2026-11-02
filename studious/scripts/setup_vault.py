@@ -41,7 +41,7 @@ Edit with `/studious setup`, or by hand.
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'vault')))
+    parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'studious')))
     args = parser.parse_args(argv)
     vault = Path(args.vault).expanduser()
     done = []
