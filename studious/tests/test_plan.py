@@ -210,6 +210,10 @@ def test_timetable_rows_now_and_sessions():
     assert 'unseen · 0/1' in md
     assert '<th>Oct 30</th>' in md and '>50%<' in md  # one Again out of two reviews
     assert '✓' in md
+    assert 'cram:' not in md  # no plan, no verdict
+    p = planner.plan(s)
+    md = timetable.render(s, s['goals'][0], p['goals'][0])
+    assert 'cram: false' in md and 'lessons_left: 1' in md and 'minutes_left: 40' in md and 'date: 2026-11-11' in md
     assert '"[[courses/CS3214/lessons/01-l1|lesson1]]"' in md and 'goal_note: "[[goals/CS3214-Test2|' in md
 
 

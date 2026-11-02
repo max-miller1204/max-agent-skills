@@ -85,7 +85,7 @@ mode: deadline            # deadline | self-paced-budget (+ weekly_hours) | self
 date: 2026-11-20          # deadline mode; keep it equal to the calendar event's date
 calendar_event_id: abc123 # the adopted calendar event, when there is one
 status: active            # active | done | archived
-cram: false               # true forces cram mode
+cram: false               # true forces cram mode; the planner's own verdict is in the timetable
 ---
 # CS4804 Exam 2
 

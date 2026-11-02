@@ -7,6 +7,16 @@ properties:
     displayName: Minutes
   formula.days_left:
     displayName: Days left
+  note.goal_note:
+    displayName: Goal
+  note.cram:
+    displayName: Cram
+  note.lessons_left:
+    displayName: Lessons left
+  note.minutes_left:
+    displayName: Minutes left
+  note.new_cards_per_day:
+    displayName: New cards/day
 views:
   - type: table
     name: To read
@@ -70,14 +80,15 @@ views:
     name: Goals
     filters:
       and:
-        - file.inFolder("goals")
+        - file.inFolder("timetable")
     order:
-      - file.name
-      - title
+      - goal_note
       - date
       - formula.days_left
-      - status
       - cram
+      - lessons_left
+      - minutes_left
+      - new_cards_per_day
     sort:
       - property: date
         direction: ASC

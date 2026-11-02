@@ -187,15 +187,16 @@ class Run:
                                                   else '; parameters unchanged (not enough reviews yet).'))
         return result
 
-    def timetables(self, state):
+    def timetables(self, state, plan):
         out = self.vault / 'timetable'
         out.mkdir(parents=True, exist_ok=True)
+        status = {(g['course'], g['id']): g for g in plan['goals']}
         written = []
         for goal in state['goals']:
             if goal.get('status', 'active') == 'active':
                 path = out / f"{goal['course']}-{goal['id']}.md"
                 if not self.dry_run:
-                    path.write_text(timetable.render(state, goal), encoding='utf-8')
+                    path.write_text(timetable.render(state, goal, status.get((goal['course'], goal['id']))), encoding='utf-8')
                 written.append(path.name)
         return written
 
@@ -272,7 +273,7 @@ def main(argv=None):
                 state, plan = run.step('re-plan', run.make_plan, required=True)
         run.step('apply to anki', run.apply, plan)
         run.step('optimize fsrs', run.optimize)
-        run.step('timetables', run.timetables, state)
+        run.step('timetables', run.timetables, state, plan)
         if not args.no_calendar:
             run.step('calendar', run.calendar_sync, plan)
     except StopRun:

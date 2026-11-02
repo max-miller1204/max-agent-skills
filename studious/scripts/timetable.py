@@ -44,7 +44,9 @@ def review_day(ms, tz):
     return (datetime.datetime.fromtimestamp(ms / 1000, tz) - datetime.timedelta(hours=4)).date()
 
 
-def render(state, goal):
+def render(state, goal, planned=None):
+    """The timetable note for one goal. `planned` is the goal's entry in the plan (plan.py), whose
+    verdict (cram mode, what's left) goes into the properties for the dashboard's Goals view."""
     cfg = state['config']
     tz = ZoneInfo(cfg.get('timezone') or 'America/New_York')
     today = datetime.date.fromisoformat(state['today'])
@@ -105,7 +107,14 @@ def render(state, goal):
     in_scope = sorted(lessons.values(), key=lambda l: l['order'])
     links = ''.join(f"\n  - {link(l['path'], l['title'])}" for l in in_scope)
     goal_link = f"\ngoal_note: {link(goal['path'], goal['title'])}" if goal.get('path') else ''
-    return (f"---\ntype: timetable\ngoal: {goal['id']}\ncourse: {goal['course']}{goal_link}\n"
+    verdict = ''
+    if planned:
+        minutes = {l['path']: l.get('minutes') or 0 for l in state['lessons']}
+        left = planned.get('lessons_left') or []
+        verdict = (f"\ndate: {goal.get('date') or ''}\ncram: {'true' if planned.get('cram') else 'false'}"
+                   f"\nlessons_left: {len(left)}\nminutes_left: {sum(int(minutes.get(p) or 0) for p in left)}"
+                   f"\nnew_cards_per_day: {planned.get('required_new_per_day') or 0}")
+    return (f"---\ntype: timetable\ngoal: {goal['id']}\ncourse: {goal['course']}{goal_link}{verdict}\n"
             f"lessons:{links or ' []'}\nupdated: {state['today']}\n---\n"
             f"# {goal['title']}{when}\n\n"
             "> [!info]- How to read this\n"
@@ -118,10 +127,15 @@ def render(state, goal):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('state')
+    parser.add_argument('--plan', help="plan.py's output, for the cram verdict and what's left")
     parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'studious')))
     args = parser.parse_args(argv)
     with open(args.state, encoding='utf-8') as f:
         state = json.load(f)
+    status = {}
+    if args.plan:
+        with open(args.plan, encoding='utf-8') as f:
+            status = {(g['course'], g['id']): g for g in json.load(f)['goals']}
     out_dir = Path(args.vault) / 'timetable'
     out_dir.mkdir(parents=True, exist_ok=True)
     written = []
@@ -129,7 +143,7 @@ def main(argv=None):
         if goal.get('status', 'active') != 'active':
             continue
         path = out_dir / f"{goal['course']}-{goal['id']}.md"
-        path.write_text(render(state, goal), encoding='utf-8')
+        path.write_text(render(state, goal, status.get((goal['course'], goal['id']))), encoding='utf-8')
         written.append(str(path))
     print(json.dumps(written, indent=2))
     return 0
