@@ -123,20 +123,58 @@ Config keys and defaults:
 | `calendar_days` | 7 | Days of events written ahead. |
 | `rag_green`, `rag_amber` | 0.90, 0.75 | Timetable color thresholds. |
 | `obsidian_sync_service` | none | systemd user service the daily run checks first. |
-| `anki_preset` | see below | Fields of each course's `studious::<COURSE>` preset, by dotted name. A key here overrides just that one. |
+| `anki_preset_name` | studious | Name given to Anki's Default preset, which every course uses. |
+| `anki_settings` | see below | Anki settings studious keeps set: `preset`, `collection`, `desktop`. |
 
-Each daily run resets these fields of every `studious::<COURSE>` preset, so change them in the
-config, not in Anki's deck options. The defaults follow the user's anki-settings rules:
-`desiredRetention` 0.9, `new.delays` and `lapse.delays` `[15]` (one same-day step with FSRS),
-`rev.perDay` 9999 (never hide due reviews; new cards set the workload), `new.bury`, `rev.bury` and
-`buryInterdayLearning` true, `lapse.leechFails` 8 with `lapse.leechAction` 1 (tag only), `maxTaken`
-360. The patch also accepts `newSortOrder`, `newMix`, `interdayLearningMix` and `reviewOrder`.
-New cards/day and the gather order (by position, so studious decides what comes first) aren't
-settable: the planner owns them. FSRS itself is a collection setting the user turns on.
+### Anki settings
 
-Anki's own `Default` preset and `Default` deck can't be deleted (the deck hides once it's empty and
-other decks exist). Deleting any other preset is a schema change that forces a one-way full sync,
-so leave unused presets alone unless the user wants to sync that way.
+Every course uses one preset: Anki's Default preset (id 1, so new decks get it too), renamed
+`anki_preset_name`. Each course deck gets its own new cards/day on the deck's "This deck" tab, set by
+the planner, and the preset's new cards/day is the all-course budget. "Limits start from top" is on,
+so a lesson subdeck never gives more than its course allows.
+
+Each daily run applies `anki_settings` (deep-merged over these defaults) and notes anything it had to
+change back, so settings live in the config, not in Anki's deck options:
+
+```yaml
+anki_settings:
+  preset:                    # any preset field, nested or dotted; must already exist in Anki
+    desiredRetention: 0.9
+    new.delays: [15]         # one short same-day step with FSRS
+    lapse.delays: [15]
+    rev.perDay: 9999         # never hide due reviews; new cards set the workload
+    newGatherPriority: 1     # by position: studious decides which new cards come first
+    new.bury: true
+    rev.bury: true
+    buryInterdayLearning: true
+    lapse.leechFails: 8
+    lapse.leechAction: 1     # tag only
+    maxTaken: 360
+  collection:
+    config: {fsrs: true, applyAllParentLimits: true}   # also fsrsHealthCheck, newCardsIgnoreReviewLimit, ...
+    preferences: {}          # e.g. {scheduling: {rollover: 4, learnAheadSecs: 1200}, reviewing: {...}, backups: {...}}
+  desktop: {}                # global: theme (0 system, 1 light, 2 dark), answer_keys, minimalist_mode, defaultLang
+                             # profile: autoSync, syncMedia, autoSyncMediaMinutes, networkTimeout, numBackups, ...
+```
+
+`new.perDay` comes from the planner. The patch refuses unknown fields, wrong types and out-of-range
+values before writing anything.
+
+```bash
+uv run scripts/anki.py settings show                 # everything, in the shape `apply` takes
+uv run scripts/anki.py settings apply --dry-run      # what the config would change
+uv run scripts/anki.py settings apply --file F.json  # a whole settings file (presets with their decks
+                                                     # and limits, collection, desktop), e.g. one saved
+                                                     # earlier with `settings show`
+```
+
+During setup: run `settings show`, walk the user through what differs from the defaults, write their
+choices into `anki_settings`, then `settings apply`.
+
+Anki's `Default` deck can't be deleted (it hides once it's empty and other decks exist), and neither
+can the Default preset. Deleting any other preset forces a one-way full sync:
+`anki.py settings remove-preset NAME --allow-full-sync` only after the user agrees, and the user
+picks the sync direction.
 
 Show the user the final config, then commit the vault.
 

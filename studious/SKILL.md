@@ -22,8 +22,8 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
 
 ## Daily mode
 
-1. `uv run scripts/daily.py`. It syncs Anki, pushes cards of lessons the user finished, sets each
-   course's new cards per day, builds cram decks, regenerates timetables, writes the calendar
+1. `uv run scripts/daily.py`. It syncs Anki, pushes cards of lessons the user finished, applies the
+   Anki settings from the config, sets each course's new cards per day, builds cram decks, regenerates timetables, writes the calendar
    events, the inbox and a run log, and commits the vault.
 2. Reply with one short paragraph: today's event title, anything in `errors` or `notes`, and the
    number of inbox items. Don't fix problems yourself in this mode; they're in the inbox for the
@@ -44,6 +44,8 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
    - "ingest ~/cs4804/notes/12-naive-bayes.pdf" → Ingest below, for that file;
    - "cram cs3214 test2" → set `cram: true` in that goal;
    - "fix my flagged cards" → Flag and fix below;
+   - "change my Anki settings" → edit `anki_settings` in the config, then `anki.py settings apply`
+     (references/onboarding.md, Anki settings);
    - nothing → ingest what's new (bounded), then the daily steps.
 4. **Deadlines.** `uv run scripts/calendar_events.py deadlines` lists exam-like events in the next
    120 days that have no goal yet. Ask whether to adopt each (tentative ones can wait); adopting

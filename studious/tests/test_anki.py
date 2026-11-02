@@ -186,3 +186,25 @@ def test_note_type_fields_match_connectors():
     fields = anki.note_fields(anki.connectors_dir())
     for name, expected in FIELDS.items():
         assert fields[name] == expected
+
+
+def test_settings_payload_merges_config_over_defaults():
+    config = {'anki_preset_name': 'study', 'anki_settings': {
+        'preset': {'new': {'delays': [10, 60]}, 'desiredRetention': 0.85},
+        'collection': {'preferences': {'scheduling': {'rollover': 5}}},
+        'desktop': {'global': {'theme': 2}}}}
+    payload = anki.settings_payload(config, new_per_day=27)
+    preset = payload['presets'][0]
+    assert preset['id'] == 1 and preset['name'] == 'study'
+    assert preset['options']['new.delays'] == [10, 60]
+    assert preset['options']['desiredRetention'] == 0.85
+    assert preset['options']['rev.perDay'] == 9999 and preset['options']['new.perDay'] == 27
+    assert payload['collection'] == {'config': {'fsrs': True, 'applyAllParentLimits': True},
+                                     'preferences': {'scheduling': {'rollover': 5}}}
+    assert payload['desktop'] == {'global': {'theme': 2}}
+
+
+def test_settings_payload_defaults():
+    preset = anki.settings_payload({})['presets'][0]
+    assert preset['name'] == 'studious' and 'new.perDay' not in preset['options']
+    assert preset['options']['newGatherPriority'] == 1

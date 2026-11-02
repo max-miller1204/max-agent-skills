@@ -36,20 +36,6 @@ DEFAULTS = {
     'budget_new_per_day': 10,      # self-paced budgeted goals
     'backlog_overdue_threshold': 0,  # overdue reviews above this -> no new cards for that course
     'calendar_days': 7,
-    # Course preset fields daily.py keeps set (the user's anki-settings rules). A config
-    # `anki_preset` overrides single keys; new cards/day and gather order come from the plan.
-    'anki_preset': {
-        'desiredRetention': 0.9,
-        'new.delays': [15],          # one short FSRS step, finished the same day
-        'lapse.delays': [15],
-        'rev.perDay': 9999,          # never hide due reviews; new cards set the workload
-        'new.bury': True,
-        'rev.bury': True,
-        'buryInterdayLearning': True,
-        'lapse.leechFails': 8,
-        'lapse.leechAction': 1,      # tag only
-        'maxTaken': 360,
-    },
 }
 
 

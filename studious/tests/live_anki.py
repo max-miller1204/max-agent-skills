@@ -153,13 +153,16 @@ def main():
         ok('flagged card maps back to its lesson block', len(flagged) == 1 and flagged[0]['card']
            and flagged[0]['card']['path'] == str(lesson), flagged)
 
-        limits = run('limits', 'StudiousSelfTest', '--new', '5', '--by-position')
+        limits = run('limits', 'StudiousSelfTest', '--new', '5')
         ok('limits applied', limits.get('newPerDay') == 5, limits)
+        shown = run('settings', 'show')
+        ok('settings show lists presets', any(x['id'] == 1 for x in shown['presets']), shown['presets'])
+        planned = run('settings', 'apply', '--dry-run')
+        ok('settings dry run from the config', planned['dryRun'] is True and 'changes' in planned, planned)
 
         names = run('call', 'deckNames')
         run('call', 'deleteDecks', json.dumps({'decks': [n for n in names if n.startswith('StudiousSelfTest')],
                                                'cardsToo': True}))
-        run('call', 'removeDeckConfigId', json.dumps({'configId': limits['presetId']}))
         run('call', 'deleteMediaFile', json.dumps({'filename': 'studiousselftest_selftest-fig.png'}))
         ok('cleanup', not [n for n in run('call', 'deckNames') if n.startswith('StudiousSelfTest')])
 

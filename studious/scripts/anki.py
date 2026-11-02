@@ -17,7 +17,13 @@ Commands (all print JSON):
   observe ROOT [--since-days N]
                               card states, FSRS estimates, revlog, today's counts for a course root deck
   flagged ROOT                flagged cards of ROOT, matched to their lesson card blocks
-  limits ROOT [--new N] [--today N] [--by-position]
+  limits ROOT [--new N] [--today N] [--preset NAME]
+                              a course root's own new cards/day ("This deck") and "Today only"
+  settings show               every Anki setting studious can change (presets, decks, collection, desktop)
+  settings apply [--file F] [--dry-run]
+                              apply `anki_settings` from the config (or a settings file) to Anki
+  settings remove-preset NAME... --allow-full-sync
+                              delete presets; forces a one-way full sync, so only with the user's OK
   reposition CARD_ID...       put these new cards first, in order
   set-flag FLAG CARD_ID...    0 clears
   suspend CARD_ID... | unsuspend CARD_ID...
@@ -95,6 +101,57 @@ def read_frontmatter(text):
 def vault_config(vault):
     path = Path(vault) / 'studious/config.md'
     return read_frontmatter(path.read_text(encoding='utf-8'))[0] if path.exists() else {}
+
+
+# The preset every course uses is Anki's Default preset (id 1), renamed `anki_preset_name`, so new
+# decks get it too. Its settings follow the user's anki-settings rules; config `anki_settings`
+# overrides any key (see references/onboarding.md). New cards/day per course are set on each
+# course deck ("This deck"), and the preset's own new cards/day is the all-course budget.
+SETTINGS_DEFAULTS = {
+    'preset': {
+        'desiredRetention': 0.9,
+        'new.delays': [15],          # one short FSRS step, finished the same day
+        'lapse.delays': [15],
+        'rev.perDay': 9999,          # never hide due reviews; new cards set the workload
+        'newGatherPriority': 1,      # by position, so studious decides which new cards come first
+        'new.bury': True,
+        'rev.bury': True,
+        'buryInterdayLearning': True,
+        'lapse.leechFails': 8,
+        'lapse.leechAction': 1,      # tag only
+        'maxTaken': 360,
+    },
+    'collection': {'config': {'fsrs': True, 'applyAllParentLimits': True}},
+}
+
+
+def flat(value, prefix=''):
+    """{'new': {'delays': [15]}} -> {'new.delays': [15]}."""
+    out = {}
+    for key, item in value.items():
+        if isinstance(item, dict) and item:
+            out.update(flat(item, prefix + key + '.'))
+        else:
+            out[prefix + key] = item
+    return out
+
+
+def merged(base, extra):
+    out = dict(base)
+    for key, value in (extra or {}).items():
+        out[key] = merged(out.get(key) or {}, value) if isinstance(value, dict) else value
+    return out
+
+
+def settings_payload(config, new_per_day=None):
+    """studiousApplySettings input from the vault config (defaults + `anki_settings`)."""
+    mine = config.get('anki_settings') or {}
+    preset = {**flat(SETTINGS_DEFAULTS['preset']), **flat(mine.get('preset') or {})}
+    if new_per_day is not None:
+        preset['new.perDay'] = new_per_day
+    return dict(presets=[dict(id=1, name=config.get('anki_preset_name') or 'studious', options=preset)],
+                collection=merged(SETTINGS_DEFAULTS['collection'], mine.get('collection')),
+                desktop=mine.get('desktop') or {})
 
 
 # ---- AnkiConnect ------------------------------------------------------------------------------
@@ -429,7 +486,13 @@ def main(argv=None):
     p.add_argument('root')
     p.add_argument('--new', type=int)
     p.add_argument('--today', type=int)
-    p.add_argument('--by-position', action='store_true')
+    p.add_argument('--preset')
+    p = sub.add_parser('settings')
+    p.add_argument('action', choices=['show', 'apply', 'remove-preset'])
+    p.add_argument('names', nargs='*')
+    p.add_argument('--file')
+    p.add_argument('--dry-run', action='store_true')
+    p.add_argument('--allow-full-sync', action='store_true')
     p = sub.add_parser('reposition')
     p.add_argument('cards', nargs='+', type=int)
     p = sub.add_parser('set-flag')
@@ -482,7 +545,16 @@ def main(argv=None):
                         card=find_card(args.vault, c['guid'])) for c in cards if c['flag']]
         elif args.cmd == 'limits':
             out = anki.call('studiousSetLimits', root=args.root, newPerDay=args.new, newToday=args.today,
-                            gatherByPosition=True if args.by_position else None)
+                            preset=args.preset)
+        elif args.cmd == 'settings' and args.action == 'show':
+            out = anki.call('studiousGetSettings')
+        elif args.cmd == 'settings' and args.action == 'apply':
+            settings = (json.loads(Path(args.file).read_text(encoding='utf-8')) if args.file
+                        else settings_payload(config))
+            out = anki.call('studiousApplySettings', settings=settings, dryRun=args.dry_run)
+        elif args.cmd == 'settings':
+            out = anki.call('studiousApplySettings', settings=dict(removePresets=args.names),
+                            allowFullSync=args.allow_full_sync, dryRun=args.dry_run)
         elif args.cmd == 'reposition':
             out = anki.call('studiousReposition', cardIds=args.cards)
         elif args.cmd == 'set-flag':

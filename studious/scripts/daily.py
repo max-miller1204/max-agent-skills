@@ -136,11 +136,16 @@ class Run:
     def apply(self, plan):
         if self.dry_run:
             return 'dry run'
-        options = {**snapshot.DEFAULTS['anki_preset'], **(self.config.get('anki_preset') or {})}
+        payload = anki.settings_payload(self.config, plan['total_new_per_day'])
+        result = self.client.call('studiousApplySettings', settings=payload)
+        reset = [c['field'] for c in result['changes'] if c['field'] not in ('new.perDay', 'name', None)]
+        if reset:
+            self.notes.append(f"Anki settings set from studious/config.md: {', '.join(reset)}.")
+        preset = payload['presets'][0]['name']
         for code, c in plan['courses'].items():
             try:
                 self.client.call('studiousSetLimits', root=code, newPerDay=c['new_per_day'], newToday=c['new_today'],
-                                 gatherByPosition=True, options=options)
+                                 preset=preset)
             except anki.Refused as exc:
                 if 'does not exist' in str(exc):
                     continue  # no cards for this course yet
