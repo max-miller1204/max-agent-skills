@@ -19,6 +19,23 @@ properties:
     displayName: New cards/day
 views:
   - type: table
+    name: Goals
+    filters:
+      and:
+        - file.inFolder("timetable")
+    order:
+      - goal_note
+      - date
+      - formula.days_left
+      - cram
+      - lessons_left
+      - minutes_left
+      - new_cards_per_day
+    sort:
+      - property: date
+        direction: ASC
+    columnSize: {}
+  - type: table
     name: To read
     filters:
       and:
@@ -77,20 +94,3 @@ views:
     sort:
       - property: file.name
         direction: ASC
-  - type: table
-    name: Goals
-    filters:
-      and:
-        - file.inFolder("timetable")
-    order:
-      - goal_note
-      - date
-      - formula.days_left
-      - cram
-      - lessons_left
-      - minutes_left
-      - new_cards_per_day
-    sort:
-      - property: date
-        direction: ASC
-    columnSize: {}
