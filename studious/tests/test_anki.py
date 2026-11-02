@@ -208,3 +208,11 @@ def test_settings_payload_defaults():
     preset = anki.settings_payload({})['presets'][0]
     assert preset['name'] == 'studious' and 'new.perDay' not in preset['options']
     assert preset['options']['newGatherPriority'] == 1
+
+
+def test_settings_payload_done_preset():
+    payload = anki.settings_payload({'anki_settings': {'done_preset': {'desiredRetention': 0.8}}}, 27, done=True)
+    main, done = payload['presets']
+    assert main['options']['new.perDay'] == 27 and 'id' not in done
+    assert done['name'] == 'studious::done' and done['options']['desiredRetention'] == 0.8
+    assert done['options']['new.perDay'] == 0 and done['options']['rev.perDay'] == 9999

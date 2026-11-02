@@ -24,6 +24,8 @@ Commands (all print JSON):
                               apply `anki_settings` from the config (or a settings file) to Anki
   settings remove-preset NAME... --allow-full-sync
                               delete presets; forces a one-way full sync, so only with the user's OK
+  optimize [--min-days N] [--dry-run]
+                              Anki's "Optimize all presets" (FSRS parameters), if N days have passed
   reposition CARD_ID...       put these new cards first, in order
   set-flag FLAG CARD_ID...    0 clears
   suspend CARD_ID... | unsuspend CARD_ID...
@@ -104,7 +106,7 @@ def vault_config(vault):
 
 
 # The preset every course uses is Anki's Default preset (id 1), renamed `anki_preset_name`, so new
-# decks get it too. Its settings follow the user's anki-settings rules; config `anki_settings`
+# decks get it too. Its settings follow the Anki manual's FSRS advice; config `anki_settings`
 # overrides any key (see references/onboarding.md). New cards/day per course are set on each
 # course deck ("This deck"), and the preset's own new cards/day is the all-course budget.
 SETTINGS_DEFAULTS = {
@@ -122,6 +124,9 @@ SETTINGS_DEFAULTS = {
         'maxTaken': 360,
     },
     'collection': {'config': {'fsrs': True, 'applyAllParentLimits': True}},
+    # Courses marked done move to `<preset>::done`: the same settings with these overrides, so their
+    # reviews thin out while the gist stays.
+    'done_preset': {'desiredRetention': 0.85},
 }
 
 
@@ -143,14 +148,19 @@ def merged(base, extra):
     return out
 
 
-def settings_payload(config, new_per_day=None):
-    """studiousApplySettings input from the vault config (defaults + `anki_settings`)."""
+def settings_payload(config, new_per_day=None, done=False):
+    """studiousApplySettings input from the vault config (defaults + `anki_settings`). With `done`,
+    also the done preset (second in `presets`)."""
     mine = config.get('anki_settings') or {}
+    name = config.get('anki_preset_name') or 'studious'
     preset = {**flat(SETTINGS_DEFAULTS['preset']), **flat(mine.get('preset') or {})}
     if new_per_day is not None:
         preset['new.perDay'] = new_per_day
-    return dict(presets=[dict(id=1, name=config.get('anki_preset_name') or 'studious', options=preset)],
-                collection=merged(SETTINGS_DEFAULTS['collection'], mine.get('collection')),
+    presets = [dict(id=1, name=name, options=preset)]
+    if done:
+        presets.append(dict(name=f'{name}::done', options={
+            **preset, 'new.perDay': 0, **flat(SETTINGS_DEFAULTS['done_preset']), **flat(mine.get('done_preset') or {})}))
+    return dict(presets=presets, collection=merged(SETTINGS_DEFAULTS['collection'], mine.get('collection')),
                 desktop=mine.get('desktop') or {})
 
 
@@ -487,6 +497,9 @@ def main(argv=None):
     p.add_argument('--new', type=int)
     p.add_argument('--today', type=int)
     p.add_argument('--preset')
+    p = sub.add_parser('optimize')
+    p.add_argument('--min-days', type=int, default=0)
+    p.add_argument('--dry-run', action='store_true')
     p = sub.add_parser('settings')
     p.add_argument('action', choices=['show', 'apply', 'remove-preset'])
     p.add_argument('names', nargs='*')
@@ -546,6 +559,8 @@ def main(argv=None):
         elif args.cmd == 'limits':
             out = anki.call('studiousSetLimits', root=args.root, newPerDay=args.new, newToday=args.today,
                             preset=args.preset)
+        elif args.cmd == 'optimize':
+            out = anki.call('studiousOptimize', minDays=args.min_days, dryRun=args.dry_run)
         elif args.cmd == 'settings' and args.action == 'show':
             out = anki.call('studiousGetSettings')
         elif args.cmd == 'settings' and args.action == 'apply':

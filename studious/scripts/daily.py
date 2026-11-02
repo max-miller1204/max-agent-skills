@@ -136,16 +136,17 @@ class Run:
     def apply(self, plan):
         if self.dry_run:
             return 'dry run'
-        payload = anki.settings_payload(self.config, plan['total_new_per_day'])
+        done = any(c.get('done') for c in plan['courses'].values())
+        payload = anki.settings_payload(self.config, plan['total_new_per_day'], done=done)
         result = self.client.call('studiousApplySettings', settings=payload)
         reset = [c['field'] for c in result['changes'] if c['field'] not in ('new.perDay', 'name', None)]
         if reset:
-            self.notes.append(f"Anki settings set from studious/config.md: {', '.join(reset)}.")
-        preset = payload['presets'][0]['name']
+            self.notes.append(f"Anki settings set from studious/config.md: {', '.join(sorted(set(reset)))}.")
+        names = [p['name'] for p in payload['presets']]
         for code, c in plan['courses'].items():
             try:
                 self.client.call('studiousSetLimits', root=code, newPerDay=c['new_per_day'], newToday=c['new_today'],
-                                 preset=preset)
+                                 preset=names[1] if c.get('done') else names[0])
             except anki.Refused as exc:
                 if 'does not exist' in str(exc):
                     continue  # no cards for this course yet
@@ -165,6 +166,17 @@ class Run:
             except anki.Refused:
                 pass  # never built
         return 'applied'
+
+    def optimize(self):
+        """FSRS optimization once `fsrs_optimize_days` have passed since the last one (Anki counts)."""
+        if self.dry_run:
+            return 'dry run'
+        result = self.client.call('studiousOptimize', minDays=int(self.config.get('fsrs_optimize_days') or 30))
+        if result['ran']:
+            changed = [p['name'] for p in result['presets'] if p['changed']]
+            self.notes.append('FSRS optimized' + (f": new parameters for {', '.join(changed)}." if changed
+                                                  else '; parameters unchanged (not enough reviews yet).'))
+        return result
 
     def timetables(self, state):
         out = self.vault / 'timetable'
@@ -250,6 +262,7 @@ def main(argv=None):
             if pushed and not args.dry_run:
                 state, plan = run.step('re-plan', run.make_plan, required=True)
         run.step('apply to anki', run.apply, plan)
+        run.step('optimize fsrs', run.optimize)
         run.step('timetables', run.timetables, state)
         if not args.no_calendar:
             run.step('calendar', run.calendar_sync, plan)

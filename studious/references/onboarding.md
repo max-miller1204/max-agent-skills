@@ -110,10 +110,10 @@ Config keys and defaults:
 | `vault_name` | the vault folder's name | The vault's name in Obsidian, for `obsidian://` links. |
 | `calendar_id` | none | The calendar the daily events go to. Unset: no calendar writes. |
 | `deadline_calendars` | all | Calendar names or ids scanned for exams and deadlines. |
-| `courses` | `{}` | `CODE: {folders: [path, ...]}` |
+| `courses` | `{}` | `CODE: {folders: [path, ...]}`; add `done: true` when the course is over (no new cards, done preset). |
 | `anki_minutes_per_day` | 45 | Review time for all courses; new cards/day = minutes × 60 ÷ `seconds_per_review` ÷ `reviews_per_new_card`. |
-| `seconds_per_review` | 10 | |
-| `reviews_per_new_card` | 10 | Each new card a day turns into about 10 reviews a day. |
+| `seconds_per_review` | measured, else 10 | Measured from the last 28 days once there are 100 answers. Setting it fixes the value. |
+| `reviews_per_new_card` | measured, else 10 | Each new card a day turns into about this many reviews a day. Measured once the review log spans 56 days, clamped to 4-20. Setting it fixes the value. |
 | `max_lessons_per_day` | 2 | Across all goals. |
 | `lesson_buffer_days` | 3 | Lessons finish this many days before a deadline (cram mode uses the day before). |
 | `cram_days` | 2 | Final days with a cram deck, for goals in cram mode. |
@@ -124,7 +124,8 @@ Config keys and defaults:
 | `rag_green`, `rag_amber` | 0.90, 0.75 | Timetable color thresholds. |
 | `obsidian_sync_service` | none | systemd user service the daily run checks first. |
 | `anki_preset_name` | studious | Name given to Anki's Default preset, which every course uses. |
-| `anki_settings` | see below | Anki settings studious keeps set: `preset`, `collection`, `desktop`. |
+| `anki_settings` | see below | Anki settings studious keeps set: `preset`, `done_preset`, `collection`, `desktop`. |
+| `fsrs_optimize_days` | 30 | The daily run runs Anki's "Optimize all presets" once this many days have passed since the last optimization. |
 
 ### Anki settings
 
@@ -133,8 +134,16 @@ Every course uses one preset: Anki's Default preset (id 1, so new decks get it t
 the planner, and the preset's new cards/day is the all-course budget. "Limits start from top" is on,
 so a lesson subdeck never gives more than its course allows.
 
-Each daily run applies `anki_settings` (deep-merged over these defaults) and notes anything it had to
-change back, so settings live in the config, not in Anki's deck options:
+A course marked `done: true` moves to a second preset, `<anki_preset_name>::done` (created the first
+time): the same settings with `done_preset` on top, 85% retention by default, so its reviews thin
+out. Cram stays on filtered decks; retention isn't raised before exams, since workload climbs
+steeply above 90%. Once `fsrs_optimize_days` have passed (Anki keeps the count), the daily run
+runs "Optimize all presets", so FSRS fits your own memory as reviews accumulate.
+
+The defaults follow the Anki manual's FSRS advice: one same-day learning step, 90% retention, and an
+uncapped review limit so workload is set by new cards only. Each daily run applies `anki_settings`
+(deep-merged over these defaults) and notes anything it had to change back, so settings live in
+the config, not in Anki's deck options:
 
 ```yaml
 anki_settings:
@@ -153,6 +162,8 @@ anki_settings:
   collection:
     config: {fsrs: true, applyAllParentLimits: true}   # also fsrsHealthCheck, newCardsIgnoreReviewLimit, ...
     preferences: {}          # e.g. {scheduling: {rollover: 4, learnAheadSecs: 1200}, reviewing: {...}, backups: {...}}
+  done_preset:               # courses marked done: the preset's settings with these overrides
+    desiredRetention: 0.85
   desktop: {}                # global: theme (0 system, 1 light, 2 dark), answer_keys, minimalist_mode, defaultLang
                              # profile: autoSync, syncMedia, autoSyncMediaMinutes, networkTimeout, numBackups, ...
 ```

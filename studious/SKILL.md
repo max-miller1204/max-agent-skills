@@ -23,7 +23,7 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
 ## Daily mode
 
 1. `uv run scripts/daily.py`. It syncs Anki, pushes cards of lessons the user finished, applies the
-   Anki settings from the config, sets each course's new cards per day, builds cram decks, regenerates timetables, writes the calendar
+   Anki settings from the config, sets each course's new cards per day, optimizes FSRS monthly, builds cram decks, regenerates timetables, writes the calendar
    events, the inbox and a run log, and commits the vault.
 2. Reply with one short paragraph: today's event title, anything in `errors` or `notes`, and the
    number of inbox items. Don't fix problems yourself in this mode; they're in the inbox for the

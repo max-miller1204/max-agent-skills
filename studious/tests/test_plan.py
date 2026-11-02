@@ -210,3 +210,59 @@ def test_timetable_rows_now_and_sessions():
     assert 'unseen · 0/1' in md
     assert '<th>Oct 30</th>' in md and '>50%<' in md  # one Again out of two reviews
     assert '✓' in md
+
+
+def revlog(n_cards, per_card, days, ms=6000, start='2026-11-01'):
+    """Each of n_cards first answered `days` ago (spread), then answered per_card times."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    base = dt.datetime.fromisoformat(start).replace(hour=12, tzinfo=ZoneInfo('America/New_York'))
+    out = []
+    for c in range(n_cards):
+        first = base - dt.timedelta(days=days - (c % days))
+        for k in range(per_card):
+            when = min(first + dt.timedelta(days=k), base)
+            out.append(dict(id=int(when.timestamp() * 1000) + k, cardId=c, ease=3, kind=0 if k == 0 else 1, ms=ms))
+    return out
+
+
+def test_calibration_defaults_without_history():
+    p = planner.plan(state())
+    assert p['calibration']['seconds_per_review']['source'] == 'default'
+    assert p['calibration']['reviews_per_new_card']['source'] == 'default'
+    assert p['total_new_per_day'] == 27
+
+
+def test_calibration_measures_answer_time():
+    c = course([], code='CS3214')
+    c['revlog'] = revlog(60, 3, 20, ms=5000)  # 180 answers in the window, 5 s each
+    p = planner.plan(state(courses={'CS3214': c}))
+    assert p['calibration']['seconds_per_review'] == dict(value=5.0, source='measured', answers=180)
+    assert p['calibration']['reviews_per_new_card']['source'] == 'default'  # history too short
+    assert p['total_new_per_day'] == 54  # 45 * 60 / 5 / 10
+
+
+def test_calibration_measures_reviews_per_new_card_and_config_wins():
+    c = course([], code='CS3214')
+    c['revlog'] = revlog(120, 8, 60)
+    p = planner.plan(state(courses={'CS3214': c}))
+    measured = p['calibration']['reviews_per_new_card']
+    assert measured['source'] == 'measured' and 4 <= measured['value'] <= 20
+    s = state(courses={'CS3214': c})
+    s['config_set'] = ['seconds_per_review', 'reviews_per_new_card']
+    fixed = planner.plan(s)['calibration']
+    assert fixed['seconds_per_review']['source'] == 'config' and fixed['reviews_per_new_card']['source'] == 'config'
+
+
+def test_done_course_gets_no_new_cards():
+    cards = [card(i) for i in range(30)]
+    s = state(courses={'CS3214': course(cards)})
+    s['config']['courses'] = {'CS3214': {'folders': ['cs3214'], 'done': True}}
+    p = planner.plan(s)
+    assert p['courses']['CS3214']['new_per_day'] == 0 and p['courses']['CS3214']['done']
+
+
+def test_inbox_suggests_done_after_the_final():
+    g = goal('Final', date='2026-10-20', title='CS3214 Final Exam')
+    p = planner.plan(state([g]))
+    assert any('mark it `done: true`' in item for item in p['inbox'])

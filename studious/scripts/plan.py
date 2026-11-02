@@ -5,7 +5,7 @@
 
 No I/O besides reading the state and writing the plan; same input, same output.
 
-Rules (the user's anki-settings rules plus lesson pacing):
+Rules (Anki and FSRS guidance on workload, plus lesson pacing):
 - New cards/day budget for all courses = minutes x 60 / seconds_per_review / reviews_per_new_card.
 - Overdue reviews above the backlog threshold -> no new cards for that course until they're done,
   unless one of its goals is within the cram window.
@@ -17,6 +17,9 @@ Rules (the user's anki-settings rules plus lesson pacing):
   fit switches to cram mode: lessons may run until the day before, cards are pushed without waiting
   for lessons, and for the last `cram_days` a filtered deck of its weakest cards is built.
 - A course with new cards but no deadline pressure gets `casual_new_per_day`.
+- A course marked `done: true` in the config gets no new cards (its decks move to the done preset).
+- seconds_per_review and reviews_per_new_card are measured from the last 28 days of reviews once there
+  is enough history (see calibrate); values set in the config always win.
 """
 import argparse
 import datetime
@@ -24,6 +27,7 @@ import json
 import math
 import sys
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
@@ -50,10 +54,61 @@ def obsidian_link(vault_name, path):
     return f"obsidian://open?vault={quote(vault_name)}&file={quote(file, safe='')}"
 
 
+CALIBRATION_DAYS = 28
+
+
+def calibrate(state):
+    """seconds_per_review and reviews_per_new_card from every course's review log when there is
+    enough of it, else the default. A value set in the config always wins.
+
+    - seconds per review: mean answer time over the last 28 days (each answer capped at 2 minutes),
+      once there are 100 answers.
+    - reviews per new card: answers per day / new cards per day over the last 28 days, once the
+      review log spans 56 days and 30 cards were new in the window (a card's first answer in the
+      log counts as new). Clamped to 4-20: early on it reads low, because reviews of new cards
+      haven't piled up yet.
+    """
+    cfg, explicit = state['config'], set(state.get('config_set') or [])
+    today = day(state['today'])
+    tz = ZoneInfo(cfg.get('timezone') or 'America/New_York')
+
+    def age(r):
+        return (today - datetime.datetime.fromtimestamp(r['id'] / 1000, tz).date()).days
+
+    answers = [r for c in (state.get('courses') or {}).values() for r in c.get('revlog') or []
+               if r['kind'] in (0, 1, 2, 3)]
+    recent = [r for r in answers if 0 <= age(r) < CALIBRATION_DAYS]
+    out = {}
+    timed = [min(r['ms'], 120000) for r in recent if r['ms'] > 0]
+    if 'seconds_per_review' in explicit:
+        out['seconds_per_review'] = dict(value=cfg['seconds_per_review'], source='config')
+    elif len(timed) >= 100:
+        out['seconds_per_review'] = dict(value=max(1.0, round(sum(timed) / len(timed) / 1000, 1)),
+                                         source='measured', answers=len(timed))
+    else:
+        out['seconds_per_review'] = dict(value=cfg['seconds_per_review'], source='default', answers=len(timed))
+    first = {}
+    for r in answers:
+        first[r['cardId']] = max(first.get(r['cardId'], -1), age(r))
+    new_recent = sum(1 for a in first.values() if a < CALIBRATION_DAYS)
+    history = max(first.values(), default=0)
+    if 'reviews_per_new_card' in explicit:
+        out['reviews_per_new_card'] = dict(value=cfg['reviews_per_new_card'], source='config')
+    elif history >= 2 * CALIBRATION_DAYS and new_recent >= 30:
+        out['reviews_per_new_card'] = dict(value=round(min(20.0, max(4.0, len(recent) / new_recent)), 1),
+                                           source='measured', new_cards=new_recent, answers=len(recent))
+    else:
+        out['reviews_per_new_card'] = dict(value=cfg['reviews_per_new_card'], source='default',
+                                           history_days=history, new_cards=new_recent)
+    return out
+
+
 def plan(state):
     today = day(state['today'])
     cfg = state['config']
-    total_cap = int(cfg['anki_minutes_per_day'] * 60 / cfg['seconds_per_review'] / cfg['reviews_per_new_card'])
+    calibration = calibrate(state)
+    total_cap = int(cfg['anki_minutes_per_day'] * 60 / calibration['seconds_per_review']['value']
+                    / calibration['reviews_per_new_card']['value'])
     horizon = int(cfg['calendar_days'])
     max_lessons = int(cfg['max_lessons_per_day'])
     courses = state.get('courses') or {}
@@ -131,6 +186,9 @@ def plan(state):
     for code in codes:
         course = courses.get(code) or {}
         cards = course.get('cards') or []
+        if ((cfg.get('courses') or {}).get(code) or {}).get('done'):
+            course_out[code] = dict(new_per_day=0, new_today=None, overdue=0, new_pool=0, reposition=None, done=True)
+            continue
         today_num = course.get('today')
         new_pool = sum(1 for c in cards if c['type'] == 0 and not c['suspended'])
         overdue = sum(1 for c in cards if c['type'] == 2 and c['queue'] == 2 and today_num is not None
@@ -277,7 +335,15 @@ def plan(state):
 
     for g in goals_out:
         g.pop('scope_new', None)
-    return dict(today=today.isoformat(), total_new_per_day=total_cap, goals=goals_out, courses=course_out,
+    for code in sorted({g['course'] for g in state.get('goals') or []}):
+        mine = [g for g in state.get('goals') or [] if g['course'] == code and g.get('date')]
+        finals = [g for g in mine if 'final' in f"{g['id']} {g.get('title', '')}".lower()]
+        done = ((cfg.get('courses') or {}).get(code) or {}).get('done')
+        if finals and not done and all(day(g['date']) < today for g in mine):
+            inbox.append(f"{code}'s final is over: mark it `done: true` under courses in the config, so its "
+                         f"cards move to the done preset (lower retention, fewer reviews)?")
+    return dict(today=today.isoformat(), total_new_per_day=total_cap, calibration=calibration,
+                goals=goals_out, courses=course_out,
                 push=push, cram=cram, cram_delete=sorted(set(cram_delete)), days=days,
                 inbox=inbox, warnings=warnings)
 
