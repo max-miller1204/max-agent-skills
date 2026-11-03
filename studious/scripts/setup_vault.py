@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-FOLDERS = ['studious/runs', 'studious/manifests', 'goals', 'courses', 'timetable', 'attachments',
+FOLDERS = ['studious/reports', 'studious/manifests', 'goals', 'courses', 'timetable', 'attachments',
            '.obsidian/snippets']
 SNIPPET = """.callout[data-callout="card"] { --callout-color: 59, 110, 165; --callout-icon: lucide-layers; }
 .callout[data-callout="supplementary"] { --callout-color: 130, 130, 130; --callout-icon: lucide-book-plus; }

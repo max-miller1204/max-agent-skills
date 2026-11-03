@@ -24,7 +24,7 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
 
 1. `uv run scripts/daily.py`. It syncs Anki, pushes cards of lessons the user finished, applies the
    Anki settings from the config, sets each course's new cards per day, optimizes FSRS monthly, builds cram decks, regenerates timetables, writes the calendar
-   events, the inbox and a run log, and commits the vault.
+   events and the inbox, commits the vault, and logs the run to `~/.local/state/studious/`.
 2. Reply with one short paragraph: today's event title, anything in `errors` or `notes`, and the
    number of inbox items. Don't fix problems yourself in this mode; they're in the inbox for the
    next interactive run.
@@ -103,7 +103,7 @@ never creates a calendar event; the daily quota events are the only ones studiou
 For each: decide whether the card is wrong, ambiguous, overloaded (split it), or fine and the gap is
 the user's (point them to the lesson section). Fix the block in the lesson, re-verify that card
 against the source, push the lesson (updates keep review history), then clear the flag with
-`anki.py set-flag 0 CARD_ID`. Note what changed in `studious/runs/`.
+`anki.py set-flag 0 CARD_ID`. Note what changed in `studious/reports/`.
 
 ## Rules
 
@@ -122,7 +122,7 @@ against the source, push the lesson (updates keep review history), then clear th
 studious/config.md      settings (references/onboarding.md)    goals/<COURSE>-<id>.md
 studious/inbox.md       decisions waiting for the user          courses/<COURSE>/lessons/<NN>-<slug>.md
 studious/manifests/     ingested source hashes                  courses/<COURSE>/practice/<NN>-<slug>/
-studious/runs/          run logs, verification reports          timetable/<COURSE>-<id> timetable.md
+studious/reports/       verification and flag-fix reports       timetable/<COURSE>-<id> timetable.md
 studious/calendar.json  managed calendar events                 attachments/
 studious/retired.json   cards suspended for retired courses
 Dashboard.base          lesson and goal views (Obsidian Bases)

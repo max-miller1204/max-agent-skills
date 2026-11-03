@@ -12,8 +12,9 @@
 3. Snapshot and plan; push the cards of lessons marked done (or all in-scope cards in cram mode);
    re-snapshot and re-plan if anything was pushed.
 4. Apply the plan to Anki: new cards/day per course, today-only overrides, reposition, cram decks.
-5. Regenerate the timetables, write the calendar events, the inbox and a run log.
+5. Regenerate the timetables, write the calendar events and the inbox.
 6. Commit the vault (local git), AnkiWeb sync again, quit Anki if this run started it.
+7. Write a run log outside the vault, to ~/.local/state/studious/runs/<vault>/ (the last 60 are kept).
 
 Prints a JSON summary; exits 1 if any step failed (the failure is in the inbox too).
 """
@@ -30,6 +31,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+KEEP_LOGS = 60
 
 
 def load(name, file):
@@ -245,10 +247,13 @@ class Run:
     def write_log(self, summary):
         if self.dry_run:
             return
+        state = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'studious'
+        runs = state / 'runs' / self.vault.name  # machine-local; the inbox carries anything the user needs
+        runs.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime('%Y-%m-%d-%H%M')
-        path = self.vault / f'studious/runs/{stamp}-daily.md'
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text('# Daily run ' + stamp + '\n\n```json\n' + json.dumps(summary, indent=1) + '\n```\n')
+        (runs / f'{stamp}-daily.json').write_text(json.dumps(summary, indent=1) + '\n')
+        for old in sorted(runs.glob('*-daily.json'))[:-KEEP_LOGS]:
+            old.unlink()
 
     def commit(self):
         if self.dry_run or not (self.vault / '.git').exists():
@@ -295,12 +300,12 @@ def main(argv=None):
     run.write_inbox(plan)
     summary = dict(date=datetime.date.today().isoformat(), dryRun=args.dry_run, steps=run.steps, notes=run.notes,
                    errors=run.errors, today=(plan or {}).get('days', [{}])[0].get('title'))
-    run.write_log(summary)
     run.step('commit vault', run.commit)
     if not any(s['step'] == 'anki' and not s['ok'] for s in run.steps):
         run.step('anki sync (after)', run.anki_sync)
         run.step('quit anki', run.quit_anki)
     summary.update(steps=run.steps, errors=run.errors)
+    run.write_log(summary)
     print(json.dumps(summary, indent=2))
     return 1 if run.errors else 0
 
