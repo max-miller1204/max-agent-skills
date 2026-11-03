@@ -216,3 +216,62 @@ def test_settings_payload_done_preset():
     assert main['options']['new.perDay'] == 27 and 'id' not in done
     assert done['name'] == 'studious::done' and done['options']['desiredRetention'] == 0.8
     assert done['options']['new.perDay'] == 0 and done['options']['rev.perDay'] == 9999
+
+
+def test_goals_written_as_one_value_are_a_list():
+    assert anki.as_list('Test2') == ['Test2']
+    assert anki.as_list(['Test2', 'Final']) == ['Test2', 'Final']
+    assert anki.as_list(None) == []
+
+
+class FakeAnki:
+    """studiousNotes and studiousUpsertNotes against an in-memory set of guids."""
+
+    def __init__(self):
+        self.guids = set()
+
+    def call(self, action, **params):
+        if action == 'studiousNotes':
+            return [dict(guid=g) for g in params['guids'] if g in self.guids]
+        assert action == 'studiousUpsertNotes'
+        out = []
+        for n in params['notes']:
+            out.append(dict(guid=n['guid'], action='updated' if n['guid'] in self.guids else 'created'))
+            self.guids.add(n['guid'])
+        return out
+
+
+def write_lesson(vault, text):
+    path = vault / 'courses/CS3214/lessons/07-condvars.md'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding='utf-8')
+    return path
+
+
+def test_push_refuses_a_deck_outside_the_course(tmp_path):
+    path = write_lesson(tmp_path, LESSON.replace('deck: CS3214::L_CondVars', 'deck: L_CondVars'))
+    report = anki.push(FakeAnki(), str(tmp_path), [str(path)])
+    assert 'must be under the course deck' in report[0]['errors'][0]
+
+
+def test_push_records_what_snapshot_fingerprints(tmp_path):
+    sspec = importlib.util.spec_from_file_location('snapshot', SCRIPTS / 'snapshot.py')
+    snapshot = importlib.util.module_from_spec(sspec)
+    sspec.loader.exec_module(snapshot)
+    path = write_lesson(tmp_path, LESSON.replace('done: false', 'done: true'))
+    anki.push(FakeAnki(), str(tmp_path), [str(path)])
+    record = json.loads((tmp_path / 'studious/pushed.json').read_text())
+    cards = snapshot.lessons(tmp_path)[0]['cards']
+    assert len(record) == 2 and {c['guid']: c['hash'] for c in cards} == record
+    path.write_text(path.read_text().replace('Waking does not', 'Waking alone does not'))
+    changed = {c['guid']: c['hash'] for c in snapshot.lessons(tmp_path)[0]['cards']}
+    assert sum(record[g] != h for g, h in changed.items()) == 1  # only the edited card
+
+
+def test_snapshot_spells_course_codes_as_the_config_does():
+    sspec = importlib.util.spec_from_file_location('snapshot', SCRIPTS / 'snapshot.py')
+    snapshot = importlib.util.module_from_spec(sspec)
+    sspec.loader.exec_module(snapshot)
+    items = [dict(course='cs3214'), dict(course='Other')]
+    snapshot.spell_courses({'courses': {'CS3214': {}}}, items)
+    assert [i['course'] for i in items] == ['CS3214', 'Other']

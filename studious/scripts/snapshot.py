@@ -19,6 +19,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('studious_anki', HERE / 'anki.py')
@@ -61,9 +62,9 @@ def lessons(vault):
         blocks = anki.parse_cards(text)
         out.append(dict(
             path=str(path.relative_to(vault)), title=fm.get('title') or path.stem, course=str(fm['course']),
-            deck=fm.get('deck'), order=int(m.group(1)) if m else 999, goals=[str(g) for g in fm.get('goals') or []],
+            deck=fm.get('deck'), order=int(m.group(1)) if m else 999, goals=anki.as_list(fm.get('goals')),
             done=bool(fm.get('done')), verified=bool(fm.get('verified')), minutes=fm.get('minutes'),
-            cards=[dict(guid=b['meta'].get('id'), count=card_count(b)) for b in blocks]))
+            cards=[dict(guid=b['meta'].get('id'), count=card_count(b), hash=anki.card_hash(text, b)) for b in blocks]))
     return out
 
 
@@ -81,6 +82,13 @@ def goals(vault):
     return out
 
 
+def spell_courses(config, items):
+    """The planner matches course codes exactly, Anki ignores case: spell them as the config does."""
+    spelling = {code.lower(): code for code in config.get('courses') or {}}
+    for item in items:
+        item['course'] = spelling.get(item['course'].lower(), item['course'])
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'studious')))
@@ -92,9 +100,12 @@ def main(argv=None):
     mine = {k: v for k, v in anki.vault_config(vault).items() if v is not None}
     config = {**DEFAULTS, 'vault_name': vault.name, **mine}
     retired = vault / 'studious/retired.json'  # cards studious suspended for retired courses
-    state = dict(today=args.today or datetime.date.today().isoformat(), config=config, config_set=sorted(mine),
+    today = datetime.datetime.now(ZoneInfo(config.get('timezone') or 'America/New_York')).date()
+    state = dict(today=args.today or today.isoformat(), config=config, config_set=sorted(mine),
                  goals=goals(vault), lessons=lessons(vault), courses={}, errors=[],
-                 retired=json.loads(retired.read_text()) if retired.exists() else {})
+                 retired=json.loads(retired.read_text()) if retired.exists() else {},
+                 pushed=anki.pushed_record(vault)[1])
+    spell_courses(config, state['goals'] + state['lessons'])
     client = anki.Anki(int(config.get('anki_port') or 8765), os.environ.get('STUDIOUS_ANKI_PROFILE') or config.get('anki_profile'))
     since = int((time.time() - args.since_days * 86400) * 1000)
     codes = sorted({g['course'] for g in state['goals']} | {l['course'] for l in state['lessons']})

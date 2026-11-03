@@ -185,7 +185,7 @@ def test_reposition_puts_scope_first_interleaving_lessons():
 
 def test_past_goal_asks_and_removes_cram_deck():
     p = planner.plan(state([goal(date='2026-10-30')]))
-    assert any('keep, archive or carry' in i for i in p['inbox'])
+    assert any('archive it, or carry its unread lessons' in i for i in p['inbox'])
     assert p['cram_delete'] == ['CS3214::Test2 cram']
 
 
@@ -369,3 +369,74 @@ def test_retagging_an_unread_lesson_does_not_release_its_held_cards():
     p = planner.plan(carried(pushed=2))
     assert p['push'] == [dict(path='courses/CS3214/lessons/01-l1.md', ungated=False)]
     assert p['days'][0]['new'] == 0
+
+
+def test_edited_card_in_anki_is_pushed_again():
+    l = lesson(1, done=True, pushed=True)
+    for c in l['cards']:
+        c['hash'] = 'h1'
+    cards = [card(i + 1, guid=c['guid'], goals=['Test2'], type_=2, due=TODAY_NUM + 30) for i, c in enumerate(l['cards'])]
+    s = state([goal()], [l], {'CS3214': course(cards)})
+    s['pushed'] = {c['guid']: 'h1' for c in l['cards']}
+    assert planner.plan(s)['push'] == []
+    s['pushed'][l['cards'][0]['guid']] = 'h0'  # the block changed since its last push
+    assert planner.plan(s)['push'] == [dict(path='courses/CS3214/lessons/01-l1.md', ungated=False)]
+    del s['pushed'][l['cards'][0]['guid']]  # never recorded (pushed before the record existed)
+    assert planner.plan(s)['push'] == [dict(path='courses/CS3214/lessons/01-l1.md', ungated=False)]
+
+
+def test_calibration_does_not_count_mature_cards_as_new():
+    import datetime as dt
+
+    def answer(cid, days_ago, kind):
+        t = dt.datetime(2026, 11, 1, 12) - dt.timedelta(days=days_ago)
+        return dict(id=int(t.timestamp() * 1000), cardId=cid, ease=3, kind=kind, ms=5000)
+    log = [answer(i, 100, 0) for i in range(40)] + [answer(i, d, 1) for i in range(40) for d in (90, 60, 30, 10)]
+    log += [answer(1000 + i, 10, 1) for i in range(200)]  # mature: their earlier reviews predate the log
+    s = state(courses={'CS3214': dict(course([]), revlog=log)})
+    assert planner.calibrate(s)['reviews_per_new_card']['source'] == 'default'
+
+
+def test_today_only_limit_is_never_below_the_daily_limit():
+    cards = [card(i, goals=['Quiz']) for i in range(4)] + [card(100 + i, goals=['Exam']) for i in range(40)]
+    p = planner.plan(state([goal('Quiz', date='2026-11-02'), goal('Exam', date='2026-11-06')],
+                           courses={'CS3214': course(cards)}, anki_minutes_per_day=200))
+    c = p['courses']['CS3214']
+    assert c['new_per_day'] == 11 and c['new_today'] == 11  # (4 + 40) / 4, not the quiz's 4
+
+
+def test_cram_deck_is_deleted_once_cram_mode_ends():
+    s = state([goal(date='2026-11-02', cram=True)], [lesson(1, done=True, pushed=True)])
+    assert [d['name'] for d in planner.plan(s)['cram']] == ['CS3214::Test2 cram']
+    s['goals'][0]['cram'] = False
+    p = planner.plan(s)
+    assert p['cram'] == [] and p['cram_delete'] == ['CS3214::Test2 cram']
+
+
+def test_unverified_lessons_are_not_put_on_the_calendar():
+    p = planner.plan(state([goal()], [lesson(1, verified=False), lesson(2)]))
+    assert [l['path'] for d in p['days'] for l in d['lessons']] == ['courses/CS3214/lessons/02-l2.md']
+    assert p['goals'][0]['lessons_left'] == ['courses/CS3214/lessons/01-l1.md', 'courses/CS3214/lessons/02-l2.md']
+
+
+def test_forecast_frees_the_budget_after_an_urgent_deadline():
+    urgent = [card(i, goals=['Test2']) for i in range(40)]
+    later = [card(100 + i, course='MATH', goals=['Final']) for i in range(60)]
+    p = planner.plan(state([goal(date='2026-11-02'), goal('Final', course='MATH', date='2026-11-11')],
+                           courses={'CS3214': course(urgent), 'MATH': course(later, code='MATH')}))
+    assert p['courses']['MATH']['new_per_day'] == 0  # today CS3214 takes the whole budget
+    assert [d['new'] for d in p['days'][:3]] == [40, 8, 8]  # then MATH: 60 / (9 - 1) a day
+
+
+def test_cram_warning_names_nearer_deadlines_when_they_fill_the_day():
+    ls = [lesson(n) for n in range(1, 4)] + [lesson(n, course='MATH', goals=('Q',)) for n in range(1, 5)]
+    p = planner.plan(state([goal(date='2026-11-02'), goal('Q', course='MATH', date='2026-11-05')], ls))
+    lesson_warnings = [w for w in p['warnings'] if 'lesson' in w]
+    assert any(w.startswith('CS3214 Test2: 3 lessons left in 1 day') for w in lesson_warnings)
+    assert any(w.startswith('MATH Q:') and 'nearer deadlines' in w for w in lesson_warnings)
+
+
+def test_timetable_of_a_past_goal_says_days_ago():
+    s = state([goal(date='2026-10-29')], [lesson(1)])
+    md = timetable.render(s, s['goals'][0])
+    assert '3 days ago' in md and 'date: 2026-10-29' in md

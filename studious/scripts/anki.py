@@ -50,6 +50,7 @@ note. It creates a card in Anki only when the lesson has `verified: true` and `d
 """
 import argparse
 import base64
+import hashlib
 import html
 import json
 import os
@@ -103,6 +104,13 @@ def read_frontmatter(text):
 def vault_config(vault):
     path = Path(vault) / 'studious/config.md'
     return read_frontmatter(path.read_text(encoding='utf-8'))[0] if path.exists() else {}
+
+
+def as_list(value):
+    """A frontmatter list that may have been written as one bare value (`goals: Test2`)."""
+    if value is None:
+        return []
+    return [str(v) for v in value] if isinstance(value, list) else [str(value)]
 
 
 # The preset every course uses is Anki's Default preset (id 1), renamed `anki_preset_name`, so new
@@ -248,6 +256,18 @@ def new_guid(prefix):
     return f'{prefix}_{secrets.token_hex(6)}'
 
 
+def card_hash(text, card):
+    """Fingerprint of a card block as written, to tell which cards changed since their last push."""
+    block = '\n'.join(text.split('\n')[card['line']:card['end']])
+    return hashlib.sha256(block.encode()).hexdigest()[:16]
+
+
+def pushed_record(vault):
+    """studious/pushed.json: guid -> card_hash at its last push."""
+    path = Path(vault) / 'studious/pushed.json'
+    return path, (json.loads(path.read_text()) if path.exists() else {})
+
+
 # ---- markdown -> Anki HTML -------------------------------------------------------------------------
 
 MD = MarkdownIt('commonmark', {'html': True, 'breaks': True}).enable(['table', 'strikethrough'])
@@ -378,7 +398,7 @@ def build_note(card, lesson, path, converter, fields_by_type):
     for value in out.values():
         check_cloze(value)
     course = lesson['course']
-    goals = lesson.get('goals') or []
+    goals = as_list(lesson.get('goals'))
     tags = [f'{course}::exam::{g}' for g in goals]
     card_tags = [t.strip() for t in re.split(r'[,\s]+', card['meta'].get('tags', '')) if t.strip()]
     if 'cheatsheet' in card_tags:
@@ -398,6 +418,7 @@ def lesson_files(paths):
 def push(anki, vault, paths, ungated=False, dry_run=False):
     connectors = connectors_dir()
     fields_by_type = note_fields(connectors)
+    record_path, record = pushed_record(vault)
     report = []
     for path in lesson_files(paths):
         text = path.read_text(encoding='utf-8')
@@ -410,6 +431,9 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
         missing = [k for k in ('course', 'deck') if not lesson.get(k)]
         if missing:
             entry['errors'].append(f'frontmatter needs {missing}')
+            continue
+        if not str(lesson['deck']).lower().startswith(str(lesson['course']).lower() + '::'):
+            entry['errors'].append(f"deck {lesson['deck']!r} must be under the course deck ({lesson['course']}::...)")
             continue
         prefix = re.sub(r'[^a-z0-9]+', '', str(lesson['course']).lower())
         changed = False
@@ -452,10 +476,19 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
                             v = v.replace(f'src="{name}"', f'src="{actual}"')
                     note['fields'][k] = v
         course = lesson['course']
-        results = anki.call('studiousUpsertNotes', notes=send,
-                            ownedTagPrefixes=[f'{course}::exam::', f'{course}::cheatsheet::'])
+        try:
+            results = anki.call('studiousUpsertNotes', notes=send,
+                                ownedTagPrefixes=[f'{course}::exam::', f'{course}::cheatsheet::'])
+        except Refused as exc:
+            entry['errors'].append(str(exc))
+            continue
+        hashes = {c['meta']['id']: card_hash(text, c) for c in cards}
         for r in results:
             entry[r['action']] += 1
+            record[r['guid']] = hashes[r['guid']]
+    if not dry_run and Path(vault).is_dir():
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        record_path.write_text(json.dumps(record, indent=1, sort_keys=True) + '\n')
     return report
 
 

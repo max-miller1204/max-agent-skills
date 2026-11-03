@@ -9,14 +9,15 @@
 
 1. Preflight: Obsidian sync service (if configured), Anki running (launched if needed).
 2. AnkiWeb sync (never a full sync).
-3. Snapshot and plan; push the cards of lessons marked done (or all in-scope cards in cram mode);
-   re-snapshot and re-plan if anything was pushed.
+3. Snapshot and plan; push the cards of lessons marked done (or all in-scope cards in cram mode),
+   and edits and retags of cards already in Anki; re-snapshot and re-plan if anything was pushed.
 4. Apply the plan to Anki: new cards/day per course, today-only overrides, reposition, cram decks.
 5. Regenerate the timetables, write the calendar events and the inbox.
 6. Commit the vault (local git), AnkiWeb sync again, quit Anki if this run started it.
 7. Write a run log outside the vault, to ~/.local/state/studious/runs/<vault>/ (the last 60 are kept).
 
-Prints a JSON summary; exits 1 if any step failed (the failure is in the inbox too).
+Prints a JSON summary; exits 1 if any step failed (the failure is in the inbox too, and so are notes
+that need the user, such as a skipped AnkiWeb sync).
 """
 import argparse
 import datetime
@@ -55,7 +56,9 @@ class Run:
         self.client = anki.Anki(int(self.config.get('anki_port') or 8765),
                                 os.environ.get('STUDIOUS_ANKI_PROFILE') or self.config.get('anki_profile'))
         self.steps, self.errors, self.notes = [], [], []
+        self.attention = []  # notes the user has to act on: they go to the inbox too
         self.launched_anki = False
+        self.pushed = False  # whether a push changed Anki, even if another lesson failed
 
     def step(self, name, fn, *args, required=False):
         try:
@@ -68,6 +71,12 @@ class Run:
             if required:
                 raise StopRun(name)
             return None
+
+    def note(self, text, attention=False):
+        if text not in self.notes:  # the after-run sync repeats the first one's notes
+            self.notes.append(text)
+            if attention:
+                self.attention.append(text)
 
     # ---- preflight ----
     def obsidian_sync(self):
@@ -113,7 +122,7 @@ class Run:
             return self.client.call('studiousSync')
         except anki.Refused as exc:
             if 'not logged in' in str(exc):
-                self.notes.append('AnkiWeb sync skipped: this profile is not logged in.')
+                self.note('AnkiWeb sync skipped: this profile is not logged in.', attention=True)
                 return None
             raise
 
@@ -135,6 +144,7 @@ class Run:
                 report.append(dict(lesson=item['path'], dryRun=True))
                 continue
             report += anki.push(self.client, str(self.vault), [str(self.vault / item['path'])], ungated=item['ungated'])
+        self.pushed = any(r.get('created') or r.get('updated') for r in report)
         problems = [f"{r['lesson']}: {e}" for r in report for e in r.get('errors') or []]
         if problems:
             raise RuntimeError('; '.join(problems))
@@ -152,7 +162,8 @@ class Run:
         result = self.client.call('studiousApplySettings', settings=payload)
         reset = [c['field'] for c in result['changes'] if c['field'] not in ('new.perDay', 'name', None)]
         if reset:
-            self.notes.append(f"Anki settings set from studious/config.md: {', '.join(sorted(set(reset)))}.")
+            self.note(f"Anki settings changed in Anki were set back from studious/config.md: "
+                      f"{', '.join(sorted(set(reset)))}. Change them in the config instead.", attention=True)
         names = [p['name'] for p in payload['presets']]
         for code, c in plan['courses'].items():
             try:
@@ -206,20 +217,19 @@ class Run:
         written = []
         for goal in state['goals']:
             path = out / timetable.filename(goal)
-            if plan['courses'].get(goal['course'], {}).get('retired'):
+            if plan['courses'].get(goal['course'], {}).get('retired') or goal.get('status', 'active') != 'active':
                 if path.exists() and not self.dry_run:
-                    path.unlink()  # a retired course's goals leave the Goals view
+                    path.unlink()  # archived and done goals, and a retired course's, leave the Goals view
                 continue
-            if goal.get('status', 'active') == 'active':
-                if not self.dry_run:
-                    path.write_text(timetable.render(state, goal, status.get((goal['course'], goal['id']))), encoding='utf-8')
-                written.append(path.name)
+            if not self.dry_run:
+                path.write_text(timetable.render(state, goal, status.get((goal['course'], goal['id']))), encoding='utf-8')
+            written.append(path.name)
         return written
 
     def calendar_sync(self, plan):
         calendar_id = self.config.get('calendar_id')
         if not calendar_id:
-            self.notes.append('Calendar skipped: no calendar_id in studious/config.md.')
+            self.note('Calendar skipped: no calendar_id in studious/config.md.', attention=True)
             return None
         cal = calendar.Calendar()
         try:
@@ -236,6 +246,8 @@ class Run:
                 lines += ['## Decisions', ''] + [f'- [ ] {i}' for i in plan['inbox']] + ['']
             if plan['warnings']:
                 lines += ['## Warnings', ''] + [f'- {w}' for w in plan['warnings']] + ['']
+        if self.attention:
+            lines += ['## Needs you', ''] + [f'- {n}' for n in self.attention] + ['']
         if self.errors:
             lines += ['## Problems in the last run', ''] + [f'- {e}' for e in self.errors] + ['']
         if len(lines) == 4:
@@ -287,8 +299,8 @@ def main(argv=None):
         run.step('anki sync', run.anki_sync, required=True)
         state, plan = run.step('plan', run.make_plan, required=True)
         if plan['push']:
-            pushed = run.step('push cards', run.push, plan['push'])
-            if pushed and not args.dry_run:
+            run.step('push cards', run.push, plan['push'])
+            if run.pushed and not args.dry_run:  # also when another lesson failed: Anki changed either way
                 state, plan = run.step('re-plan', run.make_plan, required=True)
         run.step('apply to anki', run.apply, plan)
         run.step('optimize fsrs', run.optimize)

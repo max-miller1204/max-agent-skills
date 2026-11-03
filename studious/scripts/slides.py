@@ -64,15 +64,18 @@ def montage(out, *srcs, width=1400, tile=440):
         im = Image.open(s).convert("RGB")
         im.thumbnail((tile, tile))
         ims.append(im)
-    m = Image.new("RGB", (width, 4000), "white")
+    spots = []
     x = y = rowh = 0
     for im in ims:
         if x + im.width > width:
             x, y, rowh = 0, y + rowh + 10, 0
-        m.paste(im, (x, y))
+        spots.append((x, y))
         x += im.width + 10
         rowh = max(rowh, im.height)
-    m.crop((0, 0, width, y + rowh)).save(out)
+    m = Image.new("RGB", (width, y + rowh), "white")  # as tall as the tiles need
+    for im, spot in zip(ims, spots):
+        m.paste(im, spot)
+    m.save(out)
 
 
 if __name__ == "__main__":

@@ -106,7 +106,7 @@ Config keys and defaults:
 | `anki_profile` | none | Profile the scripts may write to; every write is refused for any other profile. |
 | `anki_port` | 8765 | AnkiConnect port. |
 | `anki_launch_command` | `anki -p {profile}` (Linux), `open -g -a Anki --args -p {profile}` (Mac) | How the daily run starts Anki. |
-| `timezone` | America/New_York | For review dates in the timetable. |
+| `timezone` | America/New_York | For today's date in the plan and review dates in the timetable. |
 | `vault_name` | the vault folder's name | The vault's name in Obsidian, for `obsidian://` links. |
 | `calendar_id` | none | The calendar the daily events go to. Unset: no calendar writes. |
 | `deadline_calendars` | all | Calendar names or ids scanned for exams and deadlines. |

@@ -34,8 +34,9 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
 1. **Preflight.** `uv run scripts/anki.py doctor`. For each failed check, tell the user the fix it
    prints (installs and sign-ins are theirs to do). Warnings don't block.
 2. **Inbox.** Read `studious/inbox.md` and settle each item with the user:
-   - past deadline → keep (leave the cards), archive (`status: archived` in the goal), or carry
-     into a later goal (add that goal id to the lessons' `goals`; the next run retags their cards in Anki);
+   - past deadline → archive it (`status: archived` in the goal; its cards stay in Anki), or carry its
+     unread lessons into a later goal (add that goal id to their `goals`; the next run retags their
+     cards in Anki), then archive it;
    - unverified lesson → run the verification pass (references/verify.md);
    - goal without material → ingest its sources or drop the goal;
    - problems from the last run → fix the cause, rerun the failed step.
@@ -69,7 +70,8 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
    Crop figures with `scripts/slides.py`. Set `goals` to every goal whose scope covers it.
 5. Verify: references/verify.md (a fresh sub-agent if you can). It sets `verified: true`.
 6. `uv run scripts/manifest.py accept COURSE <files> --lesson <lesson path>`; `ignore` for files
-   deliberately skipped. Changed files: re-read, update the lesson, re-verify.
+   deliberately skipped. Changed files: re-read, update the lesson, re-verify; the next daily run
+   pushes the edited cards that are already in Anki.
 7. Cards reach Anki when the user ticks `done` on the lesson (the daily run pushes them), or right
    away in cram mode (`uv run scripts/anki.py push --ungated <lesson>`).
 
@@ -84,7 +86,7 @@ type: goal
 id: Exam2                 # used in tags: CS4804::exam::Exam2
 course: CS4804
 title: CS4804 Exam 2
-mode: deadline            # deadline | self-paced-budget (+ weekly_hours) | self-paced-casual
+mode: deadline            # deadline | self-paced-budget (+ weekly_hours) | self-paced-casual (nothing scheduled)
 date: 2026-11-20          # deadline mode; keep it equal to the calendar event's date
 calendar_event_id: abc123 # the adopted calendar event, when there is one
 status: active            # active | done | archived
@@ -125,6 +127,7 @@ studious/manifests/     ingested source hashes                  courses/<COURSE>
 studious/reports/       verification and flag-fix reports       timetable/<COURSE>-<id> timetable.md
 studious/calendar.json  managed calendar events                 attachments/
 studious/retired.json   cards suspended for retired courses
+studious/pushed.json    each card's fingerprint at its last push
 Dashboard.base          lesson and goal views (Obsidian Bases)
 ```
 

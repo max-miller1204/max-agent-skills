@@ -76,7 +76,10 @@ def render(state, goal, planned=None):
     dates = sorted({d for _, d in sessions})[-MAX_DATES:]
 
     days_left = (datetime.date.fromisoformat(goal['date']) - today).days if goal.get('date') else None
-    left = 'today' if days_left == 0 else f"{days_left} day{'' if days_left == 1 else 's'} left"
+    if days_left is not None and days_left < 0:
+        left = f"{-days_left} day{'' if days_left == -1 else 's'} ago"
+    else:
+        left = 'today' if days_left == 0 else f"{days_left} day{'' if days_left == 1 else 's'} left"
     when = f" · {goal['date']} ({left})" if days_left is not None else ''
     vault = cfg.get('vault_name', 'studious')
     rows = []
@@ -112,11 +115,11 @@ def render(state, goal, planned=None):
     in_scope = sorted(lessons.values(), key=lambda l: l['order'])
     links = ''.join(f"\n  - {link(l['path'], l['title'])}" for l in in_scope)
     goal_link = f"\ngoal_note: {link(goal['path'], goal['title'])}" if goal.get('path') else ''
-    verdict = ''
+    verdict = f"\ndate: {goal.get('date') or ''}"  # the planner leaves past goals out, so only the date
     if planned:
         minutes = {l['path']: l.get('minutes') or 0 for l in state['lessons']}
         left = planned.get('lessons_left') or []
-        verdict = (f"\ndate: {goal.get('date') or ''}\ncram: {'true' if planned.get('cram') else 'false'}"
+        verdict += (f"\ncram: {'true' if planned.get('cram') else 'false'}"
                    f"\nlessons_left: {len(left)}\nminutes_left: {sum(int(minutes.get(p) or 0) for p in left)}"
                    f"\nnew_cards_per_day: {planned.get('required_new_per_day') or 0}")
     return (f"---\ntype: timetable\ngoal: {goal['id']}\ncourse: {goal['course']}{goal_link}{verdict}\n"
@@ -145,9 +148,10 @@ def main(argv=None):
     out_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for goal in state['goals']:
-        if goal.get('status', 'active') != 'active':
-            continue
         path = out_dir / filename(goal)
+        if goal.get('status', 'active') != 'active':
+            path.unlink(missing_ok=True)  # archived and done goals leave the Goals view
+            continue
         path.write_text(render(state, goal, status.get((goal['course'], goal['id']))), encoding='utf-8')
         written.append(str(path))
     print(json.dumps(written, indent=2))
