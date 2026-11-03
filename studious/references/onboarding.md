@@ -94,7 +94,7 @@ frontmatter. Never invent values the user didn't choose; leave a key out to get 
    source folders, relative to the home folder.
 2. **Calendar**: `uv run scripts/calendar_events.py calendars`, then pick the Studious calendar
    for `calendar_id`, and the calendars that hold exams and deadlines for `deadline_calendars`.
-3. **Daily budget**: minutes of Anki per day (sets the new-card budget), most lessons per day,
+3. **Daily budget**: Anki cards per day (new cards plus reviews), most lessons per day,
    how many days before a deadline lessons should be done, how many days of cram deck.
 4. **Anki profile**: keep `testing` while trying studious out; switch later (section 6).
 5. **Timezone**, if not America/New_York.
@@ -111,9 +111,7 @@ Config keys and defaults:
 | `calendar_id` | none | The calendar the daily events go to. Unset: no calendar writes. |
 | `deadline_calendars` | all | Calendar names or ids scanned for exams and deadlines. |
 | `courses` | `{}` | `CODE: {folders: [path, ...]}`; add `done: true` when the course is over (no new cards, done preset), or `retired: true` to suspend all its cards and leave it out of planning (remove it to unsuspend). |
-| `anki_minutes_per_day` | 45 | Review time for all courses; new cards/day = minutes × 60 ÷ `seconds_per_review` ÷ `reviews_per_new_card`. |
-| `seconds_per_review` | measured, else 10 | Measured from the last 28 days once there are 100 answers. Setting it fixes the value. |
-| `reviews_per_new_card` | measured, else 10 | Each new card a day turns into about this many reviews a day. Measured once the review log spans 56 days, clamped to 4-20. Setting it fixes the value. |
+| `cards_per_day` | 150 | Anki cards a day for all courses together: new cards plus reviews (the number on the calendar event). The reviews each new card brings come from Anki's FSRS simulator, so new cards are placed where they keep every day under this; a deadline that can't fit goes over it, with a warning naming the busiest day. |
 | `max_lessons_per_day` | 2 | Across all goals. |
 | `lesson_buffer_days` | 3 | Lessons finish this many days before a deadline (cram mode uses the day before). |
 | `cram_days` | 2 | Final days with a cram deck, for goals in cram mode. |
@@ -131,7 +129,7 @@ Config keys and defaults:
 
 Every course uses one preset: Anki's Default preset (id 1, so new decks get it too), renamed
 `anki_preset_name`. Each course deck gets its own new cards/day on the deck's "This deck" tab, set by
-the planner, and the preset's new cards/day is the all-course budget. "Limits start from top" is on,
+the planner, and the preset's new cards/day is the sum of today's course limits. "Limits start from top" is on,
 so a lesson subdeck never gives more than its course allows.
 
 A course marked `done: true` moves to a second preset, `<anki_preset_name>::done` (created the first

@@ -28,7 +28,7 @@ timezone: America/New_York
 calendar_id:
 deadline_calendars: []
 courses: {}
-anki_minutes_per_day: 45
+cards_per_day: 150
 max_lessons_per_day: 2
 lesson_buffer_days: 3
 cram_days: 2
@@ -67,9 +67,7 @@ courses:
 
 | Key | Default | What it does |
 |---|---|---|
-| `anki_minutes_per_day` | `45` | Minutes of Anki a day for all courses together. Sets the new-card budget: minutes x 60 / `seconds_per_review` / `reviews_per_new_card`. |
-| `seconds_per_review` | measured, else `10` | Average seconds per answer. Measured from the last 28 days once there are 100 answers. Setting it turns measuring off. |
-| `reviews_per_new_card` | measured, else `10` | How many reviews a day each new card a day turns into. Measured once the review log spans 56 days and 30 cards were new in the last 28 (kept between 4 and 20). Setting it turns measuring off. |
+| `cards_per_day` | `150` | Anki cards a day for all courses together: new cards plus reviews, the number on the calendar event. studious asks Anki's FSRS simulator how many reviews each new card brings over the next days and places new cards so every day stays under this. A deadline that can't fit goes over it on the least busy days, and the inbox names the busiest. |
 | `max_lessons_per_day` | `2` | Most lessons scheduled on one day, across all goals. Cram mode may go over it (with a warning). |
 | `casual_new_per_day` | `5` | New cards a day for a course with cards but no deadline pressure, and for casual goals. |
 | `budget_new_per_day` | `10` | Minimum new cards a day for a course with a self-paced budgeted goal. |
@@ -145,7 +143,7 @@ Unknown fields, wrong types and out-of-range values are refused before anything 
 ## Goal notes
 
 Goals (`goals/<COURSE>-<id>.md`) have their own properties: `id`, `course`, `title`, `mode`
-(`deadline`, `self-paced-budget` with `weekly_hours` of lessons (default 3), or `self-paced-casual`), `date`,
+(`deadline`, `self-paced-budget` with `lessons_per_week` (default 4), or `self-paced-casual`), `date`,
 `calendar_event_id`, `status` (`active`, `done`, `archived`) and `cram`.
 """
 

@@ -3,8 +3,6 @@ formulas:
 properties:
   note.title:
     displayName: Title
-  note.minutes:
-    displayName: Minutes
   formula.days_left:
     displayName: Days left
   note.goal_note:
@@ -13,10 +11,10 @@ properties:
     displayName: Cram
   note.lessons_left:
     displayName: Lessons left
-  note.minutes_left:
-    displayName: Minutes left
-  note.new_cards_per_day:
-    displayName: New cards/day
+  note.cards_left:
+    displayName: Cards left
+  note.new_cards_today:
+    displayName: New cards today
 views:
   - type: table
     name: Goals
@@ -29,8 +27,8 @@ views:
       - formula.days_left
       - cram
       - lessons_left
-      - minutes_left
-      - new_cards_per_day
+      - cards_left
+      - new_cards_today
     sort:
       - property: date
         direction: ASC
@@ -40,8 +38,8 @@ views:
       formula.days_left: 85
       note.cram: 65
       note.lessons_left: 105
-      note.minutes_left: 110
-      note.new_cards_per_day: 125
+      note.cards_left: 95
+      note.new_cards_today: 135
   - type: table
     name: To read
     filters:
@@ -57,18 +55,14 @@ views:
       - file.name
       - title
       - goals
-      - minutes
       - done
     sort:
       - property: file.name
         direction: ASC
-    summaries:
-      minutes: Sum
     columnSize:
       file.name: 220
       note.title: 260
       note.goals: 120
-      note.minutes: 90
       note.done: 65
   - type: table
     name: All lessons
@@ -83,19 +77,15 @@ views:
       - file.name
       - title
       - goals
-      - minutes
       - verified
       - done
     sort:
       - property: file.name
         direction: ASC
-    summaries:
-      minutes: Sum
     columnSize:
       file.name: 220
       note.title: 260
       note.goals: 120
-      note.minutes: 90
       note.verified: 80
       note.done: 65
   - type: table

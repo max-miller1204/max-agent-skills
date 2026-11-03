@@ -25,20 +25,15 @@ filters:
 properties:
   note.title:
     displayName: Title
-  note.minutes:
-    displayName: Minutes
 views:
   - type: table
     name: Lessons
     order:
       - file.name
       - title
-      - minutes
       - verified
       - done
     sort:
       - property: file.name
         direction: ASC
-    summaries:
-      minutes: Sum
 ```

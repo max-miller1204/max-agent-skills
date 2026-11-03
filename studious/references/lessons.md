@@ -1,14 +1,14 @@
 # Lessons
 
 A lesson teaches one lecture or chapter well enough that the cards at the bottom feel like review,
-not new material. It is read in Obsidian (desktop and phone), alone, in about 25 to 50 minutes.
+not new material. It is read in Obsidian (desktop and phone), alone, in one sitting.
 Format is a means to that end: when something below would get in the way of understanding, do
 what teaches better.
 
 ## File
 
 `courses/<COURSE>/lessons/<NN>-<slug>.md`, numbered in course order (`07-condition-variables.md`).
-A topic longer than about 50 minutes splits into parts (`07a-…`, `07b-…`).
+A topic too big for one sitting splits into parts (`07a-…`, `07b-…`).
 
 ```yaml
 ---
@@ -19,7 +19,6 @@ goals: [Test2]                 # goal ids whose scope includes this lesson; driv
 sources:
   - cs3214/notes/conditionvariables.pdf
   - cs3214/cs3214-videos/conditionvariables/coordination_queue.c
-minutes: 40                    # estimate for reading + checkpoints + practice
 verified: false                # set true only by the verification pass
 done: false                    # the user ticks this; new cards reach Anki after that
 ---

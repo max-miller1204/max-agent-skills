@@ -8,10 +8,11 @@ spec = importlib.util.spec_from_file_location('plan', Path(__file__).resolve().p
 planner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(planner)
 
-CONFIG = dict(anki_minutes_per_day=45, seconds_per_review=10, reviews_per_new_card=10, max_lessons_per_day=2,
+CONFIG = dict(cards_per_day=150, max_lessons_per_day=2,
               lesson_buffer_days=3, cram_days=2, casual_new_per_day=5, budget_new_per_day=10,
               backlog_overdue_threshold=0, calendar_days=7, vault_name='vault')
 TODAY_NUM = 1000
+NEXT_DAY = [0.0, 1.0] + [0.0] * 88  # test review curve: each new card comes back once, the next day
 
 
 def card(cid, course='CS3214', deck=None, goals=(), type_=0, due=None, queue=None, guid=None):
@@ -23,7 +24,7 @@ def card(cid, course='CS3214', deck=None, goals=(), type_=0, due=None, queue=Non
 
 def lesson(n, course='CS3214', goals=('Test2',), done=False, verified=True, cards=3, pushed=False):
     return dict(path=f'courses/{course}/lessons/{n:02d}-l{n}.md', title=f'lesson{n}', course=course,
-                deck=f'{course}::L{n:02d}', order=n, goals=list(goals), done=done, verified=verified, minutes=40,
+                deck=f'{course}::L{n:02d}', order=n, goals=list(goals), done=done, verified=verified,
                 cards=[dict(guid=f'{course}-{n}-{i}' if pushed else None, count=1) for i in range(cards)])
 
 
@@ -37,20 +38,27 @@ def course(cards, counts=None, code='CS3214'):
                 preset=None, revlog=[], cards=cards)
 
 
-def state(goals=(), lessons=(), courses=None, today='2026-11-01', **cfg):
+def state(goals=(), lessons=(), courses=None, today='2026-11-01', forecast=None, **cfg):
     return dict(today=today, config={**CONFIG, **cfg}, goals=list(goals), lessons=list(lessons),
-                courses=courses or {}, errors=[])
+                courses=courses or {}, errors=[],
+                forecast=forecast or dict(source='anki', per_new_card=NEXT_DAY, load={}))
 
 
-def test_budget_is_derived_from_minutes():
-    assert planner.plan(state())['total_new_per_day'] == 27
+def test_casual_cards_fill_only_the_room_under_the_cap():
+    cards = [card(i) for i in range(30)]
+    p = planner.plan(state(courses={'CS3214': course(cards, counts=dict(new=0, learning=0, review=6))},
+                           cards_per_day=8))
+    assert p['courses']['CS3214']['new_per_day'] == 2  # 6 reviews + 2 new = 8; casual would be 5
+    assert p['days'][0]['cards'] == 8 and p['total_new_per_day'] == 2
 
 
-def test_countdown_sees_every_card_by_the_day_before():
+def test_a_deadline_is_spread_over_the_days_before_it():
     cards = [card(i, goals=['Test2']) for i in range(90)]
     p = planner.plan(state([goal(date='2026-11-11')], courses={'CS3214': course(cards)}))
-    assert p['goals'][0]['required_new_per_day'] == 10  # ceil(90 / (10 - 1))
-    assert p['courses']['CS3214']['new_per_day'] == 10
+    new = [d['new'] for d in p['days']]
+    assert 10 <= new[0] <= 15  # about 90 / 9, a little more today, before any reviews come back
+    assert all(6 <= n <= 15 for n in new) and 60 <= sum(new) < 90  # the rest on days 7 and 8, past the calendar
+    assert p['goals'][0]['required_new_per_day'] == new[0] == p['courses']['CS3214']['new_per_day']
     assert p['courses']['CS3214']['new_today'] is None
 
 
@@ -114,55 +122,63 @@ def test_backlog_stops_new_cards_unless_urgent():
     assert urgent['courses']['CS3214']['new_per_day'] > 0
 
 
-def test_shared_budget_goes_to_the_nearest_deadline():
-    a = [card(i, goals=['Test2']) for i in range(180)]                      # 180 / 9 = 20 per day
-    b = [card(1000 + i, course='CS4804', goals=['Exam2']) for i in range(190)]  # 190 / 19 = 10 per day
-    p = planner.plan(state([goal(date='2026-11-11'), goal('Exam2', 'CS4804', '2026-11-21')],
-                           courses={'CS3214': course(a), 'CS4804': course(b, code='CS4804')}))
-    assert p['courses']['CS3214']['new_per_day'] == 20
-    assert p['courses']['CS4804']['new_per_day'] == 7  # 27 - 20
-    assert any('CS4804' in w and 'budget' in w for w in p['warnings'])
-
-
-def test_short_course_is_told_the_minutes_that_fit_it():
+def test_two_deadlines_that_fit_get_no_warning():
     a = [card(i, goals=['Test2']) for i in range(180)]
     b = [card(1000 + i, course='CS4804', goals=['Exam2']) for i in range(190)]
-    goals = [goal(date='2026-11-11'), goal('Exam2', 'CS4804', '2026-11-21')]
-    courses = {'CS3214': course(a), 'CS4804': course(b, code='CS4804')}
-    p = planner.plan(state(goals, courses=courses))
-    assert ("CS4804: needs 10 new cards/day to finish in time, but the daily budget leaves 7. "
-            "Raise anki_minutes_per_day to 50 or cut scope.") in p['warnings']
-    raised = planner.plan(state(goals, courses=courses, anki_minutes_per_day=50))
-    assert raised['courses']['CS4804']['new_per_day'] == 10
-    assert not any('CS4804' in w for w in raised['warnings'])
+    p = planner.plan(state([goal(date='2026-11-11'), goal('Exam2', 'CS4804', '2026-11-21')],
+                           courses={'CS3214': course(a), 'CS4804': course(b, code='CS4804')}))
+    assert p['warnings'] == [] and not any(g['cram'] for g in p['goals'])
+    assert max(d['cards'] for d in p['days']) <= 150
 
 
-def urgent_takes_everything(cmda_date, **cfg):
-    cs = [card(i, goals=['Exam2']) for i in range(201)]
-    cmda = [card(1000 + i, course='CMDA3654', goals=['Quiz3']) for i in range(131)]
-    return planner.plan(state([goal('Exam2', date='2026-11-04'), goal('Quiz3', 'CMDA3654', cmda_date)],
-                              courses={'CS3214': course(cs), 'CMDA3654': course(cmda, code='CMDA3654')},
-                              today='2026-11-02', **cfg))
+def test_a_deadline_is_spread_instead_of_piling_up_at_the_end():
+    """The CMDA3654 case: 131 cards, quiz in 3 days. Not 27 today and 104 tomorrow."""
+    cards = [card(i, course='CMDA3654', goals=['Quiz3']) for i in range(131)]
+    p = planner.plan(state([goal('Quiz3', 'CMDA3654', '2026-11-04')],
+                           courses={'CMDA3654': course(cards, code='CMDA3654')}))
+    new = [d['new'] for d in p['days'][:3]]
+    assert sum(new[:2]) == 131 and abs(new[0] - new[1]) <= 3 and new[2] == 0
+    assert p['warnings'] == []
 
 
-def test_urgent_course_taking_the_whole_budget_is_named_with_its_date():
-    p = urgent_takes_everything('2026-11-06', anki_minutes_per_day=75)  # budget 45
-    assert p['courses']['CS3214']['new_per_day'] == 201  # within cram_days: over the budget
-    assert p['courses']['CMDA3654']['new_per_day'] == 0
-    assert ("CMDA3654: needs 44 new cards/day to finish in time, but CS3214 (2026-11-04) is within "
-            "cram_days of its deadline and takes 201 new cards/day, the whole budget of 45, so it gets none "
-            "until 2026-11-04, when its own deadline is within cram_days. "
-            "Fitting it in before then would take anki_minutes_per_day: 409.") in p['warnings']
-    assert urgent_takes_everything('2026-11-06', anki_minutes_per_day=100)['courses']['CMDA3654']['new_per_day'] == 0
-    assert urgent_takes_everything('2026-11-06', anki_minutes_per_day=408)['courses']['CMDA3654']['new_per_day'] == 43
-    assert urgent_takes_everything('2026-11-06', anki_minutes_per_day=409)['courses']['CMDA3654']['new_per_day'] == 44
+def test_new_cards_go_around_a_busy_day():
+    due = [card(500 + i, type_=2, queue=2, due=TODAY_NUM + 1) for i in range(60)]  # 60 reviews tomorrow
+    cards = [card(i, goals=['Test2']) for i in range(60)] + due
+    p = planner.plan(state([goal(date='2026-11-05')], courses={'CS3214': course(cards)}))
+    new = [d['new'] for d in p['days'][:3]]
+    assert sum(new) == 60 and new[1] < new[0] and new[1] < new[2]
 
 
-def test_urgent_course_frees_the_budget_the_day_after_its_deadline():
-    p = urgent_takes_everything('2026-11-20')
-    w = next(w for w in p['warnings'] if w.startswith('CMDA3654'))
-    assert 'until 2026-11-05, when the budget frees up' in w
-    assert 'Raise anki_minutes_per_day to' not in w
+def test_cards_that_dont_fit_go_over_the_cap_with_a_warning():
+    cards = [card(i, goals=['Test2']) for i in range(180)]
+    p = planner.plan(state([goal(date='2026-11-11')], courses={'CS3214': course(cards)}, cards_per_day=20))
+    g = p['goals'][0]
+    assert g['cram']  # they don't fit at the normal pace
+    w = next(w for w in p['warnings'] if w.startswith('CS3214 Test2: its cards'))
+    assert "don't fit in cards_per_day (20)" in w and 'Raise cards_per_day to about' in w
+    assert all(d['cards'] > 20 for d in p['days'])  # over the cap every day, since 180 in 9 days can't fit
+
+
+def test_simulated_review_load_shapes_the_placement():
+    cards = [card(i, goals=['Test2']) for i in range(40)]
+    load = {'CS3214': [0, 0, 140] + [0] * 87}  # the simulator expects 140 reviews in 2 days
+    p = planner.plan(state([goal(date='2026-11-04')], courses={'CS3214': course(cards)},
+                           forecast=dict(source='anki', per_new_card=NEXT_DAY, load=load)))
+    new = [d['new'] for d in p['days'][:3]]
+    assert new[0] + new[1] == 40 and new[1] <= 10  # tomorrow's cards come back that day: 150 - 140
+    assert max(d['cards'] for d in p['days']) <= 150 and p['warnings'] == [] and p['load']['source'] == 'anki'
+
+
+def test_without_the_simulator_the_default_curve_is_used_and_noted():
+    p = planner.plan(state(forecast=dict(source='unavailable', reason='unsupported action')))
+    assert p['load']['source'] == 'default' and 3.5 < p['load']['reviews_per_new_card_30_days'] < 5
+    assert any('anki/apply.py' in w for w in p['warnings'])
+
+
+def test_old_budget_keys_are_reported():
+    s = state()
+    s['config_set'] = ['anki_minutes_per_day']
+    assert any(w.startswith('studious/config.md sets anki_minutes_per_day') for w in planner.plan(s)['warnings'])
 
 
 def test_overlapping_goals_count_the_union_once():
@@ -170,9 +186,10 @@ def test_overlapping_goals_count_the_union_once():
     later = [card(100 + i, goals=['Final']) for i in range(60)]
     p = planner.plan(state([goal(date='2026-11-06'), goal('Final', date='2026-11-21')],
                            courses={'CS3214': course(shared + later)}))
-    rates = {g['id']: g['required_new_per_day'] for g in p['goals']}
-    assert rates == {'Test2': 10, 'Final': 6}  # 40/4 and (40+60)/19, not 160
-    assert p['courses']['CS3214']['new_per_day'] == 10
+    by_day = [d['new'] for d in p['days']]
+    assert sum(by_day[:4]) >= 40  # Test2's 40 by the day before it
+    assert sum(by_day) < 100  # the Final's 60 more are spread over its 19 days, not all this week
+    assert sum(g['unseen'] for g in p['goals']) == 140 and p['courses']['CS3214']['new_per_day'] <= 15
 
 
 def test_reposition_puts_scope_first_interleaving_lessons():
@@ -197,12 +214,11 @@ def test_archived_or_done_goal_loses_its_cram_deck():
         assert p['cram'] == [] and p['cram_delete'] == ['CS3214::Test2 cram']
 
 
-def test_no_budget_warns_instead_of_failing():
+def test_a_zero_cap_warns_instead_of_failing():
     cards = [card(i, goals=['Test2']) for i in range(40)]
-    p = planner.plan(state([goal(date='2026-11-11')], courses={'CS3214': course(cards)}, anki_minutes_per_day=0))
-    assert p['courses']['CS3214']['new_per_day'] == 0
-    assert ("CS3214: needs 5 new cards/day to finish in time, but the daily budget leaves 0. "
-            "Raise anki_minutes_per_day to 9 or cut scope.") in p['warnings']
+    p = planner.plan(state([goal(date='2026-11-11')], courses={'CS3214': course(cards)}, cards_per_day=0))
+    assert sum(d['new'] for d in p['days']) > 0  # the exam's cards still go in
+    assert any('Raise cards_per_day to about' in w for w in p['warnings'])
 
 
 def test_goal_without_material_reminds_within_21_days():
@@ -219,8 +235,9 @@ def test_event_text_format():
     p = planner.plan(state([goal(date='2026-11-11')], ls,
                            courses={'CS3214': course(cards, counts=dict(new=0, learning=1, review=4))}))
     d = p['days'][0]
-    assert d['title'] == '[studious] Daily quota: 15 cards · 1 lesson'  # 10 new + 5 due
-    assert d['description'].split('\n')[:3] == ['Today', '• Anki: 15 cards', '• Lesson: conditionvariables']
+    n = d['new'] + 5  # new + 5 due
+    assert d['title'] == f'[studious] Daily quota: {n} cards · 1 lesson' and d['cards'] == n
+    assert d['description'].split('\n')[:3] == ['Today', f'• Anki: {n} cards', '• Lesson: conditionvariables']
     assert 'obsidian://' not in d['description']
     empty = p['days'][-1]
     assert '• Lesson: none' in empty['description'] and empty['title'].endswith('· 0 lessons')
@@ -247,7 +264,7 @@ def test_exam_day_course_keeps_its_other_goals_pace_in_their_order():
     p = planner.plan(state([goal(date='2026-11-01'), goal('Final', date='2026-11-11')],
                            courses={'CS3214': course(cards)}))
     c = p['courses']['CS3214']
-    assert c['new_per_day'] == 4 and c['new_today'] is None  # ceil(30 / 9); no today-only limit
+    assert 2 <= c['new_per_day'] <= 5 and c['new_today'] is None  # about 30 / 9; no today-only limit
     assert c['reposition'][:30] == [100 + i for i in range(30)]  # the Final's cards first, not Test2's
 
 
@@ -258,9 +275,11 @@ def test_exam_day_does_not_skip_the_backlog_or_the_budget():
                            courses={'CS3214': course(cards + overdue)}))
     assert p['courses']['CS3214']['new_per_day'] == 0  # overdue reviews first, exam or not
     assert any('50 overdue reviews' in w for w in p['warnings'])
+    busy = course(cards, counts=dict(new=0, learning=0, review=25))
     p = planner.plan(state([goal(date='2026-11-01'), goal('Final', date='2026-11-11')],
-                           courses={'CS3214': course(cards)}, anki_minutes_per_day=10))
-    assert p['courses']['CS3214']['new_per_day'] == 6  # the budget of 6, not the Final's 10
+                           courses={'CS3214': busy}, cards_per_day=30))
+    assert p['courses']['CS3214']['new_per_day'] <= 5  # 25 reviews today leave room for 5
+    assert not p['goals'][1]['cram']  # the Final's 90 still fit over its other days
 
 
 def test_on_pace_goal_gets_no_cram_deck_on_its_exam_day():
@@ -313,50 +332,10 @@ def test_timetable_rows_now_and_sessions():
     assert timetable.filename(s['goals'][0]) == 'CS3214-Test2 timetable.md'  # not the goal note's name
     p = planner.plan(s)
     md = timetable.render(s, s['goals'][0], p['goals'][0])
-    assert 'cram: false' in md and 'lessons_left: 1' in md and 'minutes_left: 40' in md and 'date: 2026-11-11' in md
+    assert 'cram: false' in md and 'lessons_left: 1' in md and 'date: 2026-11-11' in md
+    assert f"cards_left: {p['goals'][0]['unseen']}" in md
+    assert 'new_cards_today:' in md and 'minutes' not in md
     assert '"[[courses/CS3214/lessons/01-l1|lesson1]]"' in md and 'goal_note: "[[goals/CS3214-Test2|' in md
-
-
-def revlog(n_cards, per_card, days, ms=6000, start='2026-11-01'):
-    """Each of n_cards first answered `days` ago (spread), then answered per_card times."""
-    import datetime as dt
-    from zoneinfo import ZoneInfo
-    base = dt.datetime.fromisoformat(start).replace(hour=12, tzinfo=ZoneInfo('America/New_York'))
-    out = []
-    for c in range(n_cards):
-        first = base - dt.timedelta(days=days - (c % days))
-        for k in range(per_card):
-            when = min(first + dt.timedelta(days=k), base)
-            out.append(dict(id=int(when.timestamp() * 1000) + k, cardId=c, ease=3, kind=0 if k == 0 else 1, ms=ms))
-    return out
-
-
-def test_calibration_defaults_without_history():
-    p = planner.plan(state())
-    assert p['calibration']['seconds_per_review']['source'] == 'default'
-    assert p['calibration']['reviews_per_new_card']['source'] == 'default'
-    assert p['total_new_per_day'] == 27
-
-
-def test_calibration_measures_answer_time():
-    c = course([], code='CS3214')
-    c['revlog'] = revlog(60, 3, 20, ms=5000)  # 180 answers in the window, 5 s each
-    p = planner.plan(state(courses={'CS3214': c}))
-    assert p['calibration']['seconds_per_review'] == dict(value=5.0, source='measured', answers=180)
-    assert p['calibration']['reviews_per_new_card']['source'] == 'default'  # history too short
-    assert p['total_new_per_day'] == 54  # 45 * 60 / 5 / 10
-
-
-def test_calibration_measures_reviews_per_new_card_and_config_wins():
-    c = course([], code='CS3214')
-    c['revlog'] = revlog(120, 8, 60)
-    p = planner.plan(state(courses={'CS3214': c}))
-    measured = p['calibration']['reviews_per_new_card']
-    assert measured['source'] == 'measured' and 4 <= measured['value'] <= 20
-    s = state(courses={'CS3214': c})
-    s['config_set'] = ['seconds_per_review', 'reviews_per_new_card']
-    fixed = planner.plan(s)['calibration']
-    assert fixed['seconds_per_review']['source'] == 'config' and fixed['reviews_per_new_card']['source'] == 'config'
 
 
 def test_done_course_gets_no_new_cards():
@@ -443,24 +422,12 @@ def test_edited_card_in_anki_is_pushed_again():
     assert planner.plan(s)['push'] == [dict(path='courses/CS3214/lessons/01-l1.md', ungated=False)]
 
 
-def test_calibration_does_not_count_mature_cards_as_new():
-    import datetime as dt
-
-    def answer(cid, days_ago, kind):
-        t = dt.datetime(2026, 11, 1, 12) - dt.timedelta(days=days_ago)
-        return dict(id=int(t.timestamp() * 1000), cardId=cid, ease=3, kind=kind, ms=5000)
-    log = [answer(i, 100, 0) for i in range(40)] + [answer(i, d, 1) for i in range(40) for d in (90, 60, 30, 10)]
-    log += [answer(1000 + i, 10, 1) for i in range(200)]  # mature: their earlier reviews predate the log
-    s = state(courses={'CS3214': dict(course([]), revlog=log)})
-    assert planner.calibrate(s)['reviews_per_new_card']['source'] == 'default'
-
-
 def test_today_only_limit_is_never_below_the_daily_limit():
     cards = [card(i, goals=['Quiz']) for i in range(4)] + [card(100 + i, goals=['Exam']) for i in range(40)]
     p = planner.plan(state([goal('Quiz', date='2026-11-02'), goal('Exam', date='2026-11-06')],
-                           courses={'CS3214': course(cards)}, anki_minutes_per_day=200))
+                           courses={'CS3214': course(cards)}))
     c = p['courses']['CS3214']
-    assert c['new_per_day'] == 11 and c['new_today'] == 11  # (4 + 40) / 4, not the quiz's 4
+    assert c['new_per_day'] > 4 and c['new_today'] == c['new_per_day']  # the quiz's 4 plus some of the exam's
 
 
 def test_cram_deck_is_deleted_once_cram_mode_ends():
@@ -477,13 +444,14 @@ def test_unverified_lessons_are_not_put_on_the_calendar():
     assert p['goals'][0]['lessons_left'] == ['courses/CS3214/lessons/01-l1.md', 'courses/CS3214/lessons/02-l2.md']
 
 
-def test_forecast_frees_the_budget_after_an_urgent_deadline():
+def test_a_later_deadline_waits_out_a_nearer_one():
     urgent = [card(i, goals=['Test2']) for i in range(40)]
     later = [card(100 + i, course='MATH', goals=['Final']) for i in range(60)]
     p = planner.plan(state([goal(date='2026-11-02'), goal('Final', course='MATH', date='2026-11-11')],
                            courses={'CS3214': course(urgent), 'MATH': course(later, code='MATH')}))
-    assert p['courses']['MATH']['new_per_day'] == 0  # today CS3214 takes the whole budget
-    assert [d['new'] for d in p['days'][:3]] == [40, 8, 8]  # then MATH: 60 / (9 - 1) a day
+    new = [d['new'] for d in p['days'][:4]]
+    assert p['courses']['CS3214']['new_today'] == 40  # all of Test2's today, the day before
+    assert p['courses']['MATH']['new_per_day'] < new[2]  # MATH steps around today's 40 and their reviews
 
 
 def test_cram_warning_names_nearer_deadlines_when_they_fill_the_day():

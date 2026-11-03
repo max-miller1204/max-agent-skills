@@ -4,7 +4,8 @@
 # dependencies = ["markdown-it-py>=3", "pygments>=2.17", "pyyaml>=6"]
 # ///
 """Collect everything the planner needs into one state.json: vault config, goals, lessons, and
-per-course Anki state (via anki.py's AnkiConnect client).
+per-course Anki state (via anki.py's AnkiConnect client), and the review load forecast from Anki's
+FSRS simulator (patch v8; without it the planner uses its built-in default curve).
 
     uv run snapshot.py [--vault DIR] [--today YYYY-MM-DD] [--out state.json]
 
@@ -27,9 +28,7 @@ anki = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(anki)
 
 DEFAULTS = {
-    'anki_minutes_per_day': 45,    # review time budget for all courses together
-    'seconds_per_review': 10,
-    'reviews_per_new_card': 10,    # each new card/day turns into ~10 reviews/day
+    'cards_per_day': 150,          # Anki cards a day for all courses together: new cards + reviews
     'max_lessons_per_day': 2,
     'lesson_buffer_days': 3,       # lessons done this many days before a deadline
     'cram_days': 2,                # cram deck for the final days of a goal in cram mode
@@ -63,7 +62,7 @@ def lessons(vault):
         out.append(dict(
             path=str(path.relative_to(vault)), title=fm.get('title') or path.stem, course=str(fm['course']),
             deck=fm.get('deck'), order=int(m.group(1)) if m else 999, goals=anki.as_list(fm.get('goals')),
-            done=bool(fm.get('done')), verified=bool(fm.get('verified')), minutes=fm.get('minutes'),
+            done=bool(fm.get('done')), verified=bool(fm.get('verified')),
             cards=[dict(guid=b['meta'].get('id'), count=card_count(b), hash=anki.card_hash(text, b)) for b in blocks]))
     return out
 
@@ -78,8 +77,23 @@ def goals(vault):
         out.append(dict(id=str(fm['id']), course=str(fm['course']), title=fm.get('title') or fm['id'],
                         mode=fm.get('mode', 'deadline'), date=str(date) if date else None,
                         status=fm.get('status', 'active'), cram=bool(fm.get('cram')),
-                        path=str(path.relative_to(vault))))
+                        lessons_per_week=fm.get('lessons_per_week'), path=str(path.relative_to(vault))))
     return out
+
+
+FORECAST_DAYS = 90
+
+
+def forecast(client, roots):
+    """Expected reviews per day from Anki's FSRS simulator: per_new_card (the curve one new card
+    follows) and load (per course, the cards already reviewed). None when the open Anki's patch is
+    older than v8 or FSRS is off: the planner then uses its default curve and the cards' due dates."""
+    try:
+        fc = client.call('studiousForecast', roots=roots, days=FORECAST_DAYS)
+    except anki.Refused as exc:
+        return dict(source='unavailable', reason=str(exc))
+    return dict(source='anki', preset=fc['preset'], params=fc['params'], per_new_card=fc['perNewCard'],
+                load=fc['load'])
 
 
 def spell_courses(config, items):
@@ -122,6 +136,7 @@ def main(argv=None):
                                               preset=None, revlog=[], cards=[])
             else:
                 state['errors'].append(f'{code}: {exc}')
+    state['forecast'] = forecast(client, [c for c in codes if state['courses'].get(c, {}).get('today') is not None])
     text = json.dumps(state, indent=1, ensure_ascii=False)
     if args.out:
         Path(args.out).write_text(text, encoding='utf-8')

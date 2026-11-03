@@ -78,7 +78,7 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
 ## Goals
 
 `goals/<COURSE>-<id>.md`, copied from `assets/goal.md` (its `## Lessons` table lists the goal's
-lessons with their minutes and checkboxes; keep it as is). The properties:
+lessons with their checkboxes; keep it as is). The properties:
 
 ```yaml
 ---
@@ -86,7 +86,7 @@ type: goal
 id: Exam2                 # used in tags: CS4804::exam::Exam2
 course: CS4804
 title: CS4804 Exam 2
-mode: deadline            # deadline | self-paced-budget (+ weekly_hours) | self-paced-casual (nothing scheduled)
+mode: deadline            # deadline | self-paced-budget (+ lessons_per_week) | self-paced-casual (nothing scheduled)
 date: 2026-11-20          # deadline mode; keep it equal to the calendar event's date
 calendar_event_id: abc123 # the adopted calendar event, when there is one
 status: active            # active | done | archived

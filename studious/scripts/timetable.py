@@ -117,11 +117,10 @@ def render(state, goal, planned=None):
     goal_link = f"\ngoal_note: {link(goal['path'], goal['title'])}" if goal.get('path') else ''
     verdict = f"\ndate: {goal.get('date') or ''}"  # the planner leaves past goals out, so only the date
     if planned:
-        minutes = {l['path']: l.get('minutes') or 0 for l in state['lessons']}
         left = planned.get('lessons_left') or []
         verdict += (f"\ncram: {'true' if planned.get('cram') else 'false'}"
-                   f"\nlessons_left: {len(left)}\nminutes_left: {sum(int(minutes.get(p) or 0) for p in left)}"
-                   f"\nnew_cards_per_day: {planned.get('required_new_per_day') or 0}")
+                   f"\nlessons_left: {len(left)}\ncards_left: {planned.get('unseen') or 0}"
+                   f"\nnew_cards_today: {planned.get('required_new_per_day') or 0}")
     return (f"---\ntype: timetable\ngoal: {goal['id']}\ncourse: {goal['course']}{goal_link}{verdict}\n"
             f"lessons:{links or ' []'}\nupdated: {state['today']}\n---\n"
             f"# {goal['title']}{when}\n\n"
