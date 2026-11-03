@@ -219,9 +219,43 @@ def test_future_days_count_due_reviews():
 def test_no_new_cards_for_a_goal_on_its_exam_day():
     cards = [card(i, goals=['Test2']) for i in range(40)]
     p = planner.plan(state([goal(date='2026-11-01', cram=True)], courses={'CS3214': course(cards)}))
+    c = p['courses']['CS3214']
     assert p['goals'][0]['required_new_per_day'] == 0
-    assert p['courses']['CS3214']['new_per_day'] == 5  # the casual pace, not all 40
+    assert c['new_per_day'] == 0 and c['new_today'] is None  # not even the casual 5: they'd be Test2 cards
     assert [d['name'] for d in p['cram']] == ['CS3214::Test2 cram']  # weak cards to look over that morning
+    assert '• Cram: CS3214 Test2 (today)' in p['days'][0]['description']
+
+
+def test_exam_day_course_keeps_its_other_goals_pace_in_their_order():
+    cards = [card(i, goals=['Test2']) for i in range(20)] + [card(100 + i, goals=['Final']) for i in range(30)]
+    p = planner.plan(state([goal(date='2026-11-01'), goal('Final', date='2026-11-11')],
+                           courses={'CS3214': course(cards)}))
+    c = p['courses']['CS3214']
+    assert c['new_per_day'] == 4 and c['new_today'] is None  # ceil(30 / 9); no today-only limit
+    assert c['reposition'][:30] == [100 + i for i in range(30)]  # the Final's cards first, not Test2's
+
+
+def test_exam_day_does_not_skip_the_backlog_or_the_budget():
+    overdue = [card(500 + i, type_=2, queue=2, due=TODAY_NUM - 1) for i in range(50)]
+    cards = [card(i, goals=['Test2']) for i in range(40)] + [card(100 + i, goals=['Final']) for i in range(90)]
+    p = planner.plan(state([goal(date='2026-11-01'), goal('Final', date='2026-11-11')],
+                           courses={'CS3214': course(cards + overdue)}))
+    assert p['courses']['CS3214']['new_per_day'] == 0  # overdue reviews first, exam or not
+    assert any('50 overdue reviews' in w for w in p['warnings'])
+    p = planner.plan(state([goal(date='2026-11-01'), goal('Final', date='2026-11-11')],
+                           courses={'CS3214': course(cards)}, anki_minutes_per_day=10))
+    assert p['courses']['CS3214']['new_per_day'] == 6  # the budget of 6, not the Final's 10
+
+
+def test_on_pace_goal_gets_no_cram_deck_on_its_exam_day():
+    p = planner.plan(state([goal(date='2026-11-01')], [lesson(1, done=True, pushed=True)]))
+    assert p['cram'] == [] and p['cram_delete'] == ['CS3214::Test2 cram']
+
+
+def test_forecast_rests_a_course_on_its_exam_day():
+    cards = [card(i, goals=['Test2']) for i in range(10)] + [card(100 + i) for i in range(90)]
+    p = planner.plan(state([goal(date='2026-11-03')], courses={'CS3214': course(cards)}))
+    assert [d['new'] for d in p['days'][:4]] == [10, 5, 0, 5]  # countdown, casual, exam day, casual
 
 
 def test_new_cards_come_back_the_next_day():

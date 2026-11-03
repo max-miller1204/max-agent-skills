@@ -13,8 +13,9 @@ Rules (Anki and FSRS guidance on workload, plus lesson pacing):
 - Overdue reviews above the backlog threshold -> no new cards for that course until they're done,
   unless one of its goals is within the cram window.
 - Deadline countdown: new/day = ceil(unseen in scope / (days left - 1)), so every card is seen by the
-  day before; on the day before, every remaining card goes in today (the "today only" override),
-  and on the exam day none do (the course keeps its other goals' pace or the casual one).
+  day before; on the day before, every remaining card goes in today (the "today only" override).
+  On the exam day the goal is over for pacing: the course gets no casual cards (they'd be that
+  exam's), only its other goals' countdowns; a goal in cram mode keeps its cram deck that day.
   Overlapping goals of one course count the union of their scopes, nearest deadline first.
 - Lessons are paced to be done `lesson_buffer_days` before the deadline, at most
   `max_lessons_per_day` across all goals, nearest deadline first. A goal whose lessons or cards don't
@@ -248,6 +249,15 @@ def plan(state):
         if n and (window < 1 or math.ceil(n / window) > max_lessons):
             g['cram'] = True
 
+    # A goal whose exam is today is over for pacing: no countdown, urgency, card order or cram pushes.
+    # It keeps a cram verdict (the day before's test: every unseen card would go in at once) for its
+    # cram deck and the calendar line.
+    exam_today = [g for g in deadline_goals if g['days_left'] == 0]
+    deadline_goals = [g for g in deadline_goals if g['days_left'] > 0]
+    for g in exam_today:
+        if g['unseen'] > total_cap:
+            g['cram'] = True
+
     # Cards: union of scopes through each deadline, nearest first.
     per_course_required = {}
     seen_ids = {}
@@ -279,16 +289,18 @@ def plan(state):
     planned_codes = [c for c in codes if c not in fixed]
     budget_courses = {g['course'] for g in active if g['mode'] == 'self-paced-budget'}
 
-    def allocate(goals_left, pool, overdue, warn=False):
+    def allocate(goals_left, pool, overdue, exam_courses, warn=False):
         """New cards/day per course for one day: {code: (new/day, today-only limit or None)}.
-        goals_left: [(goal, days left, cards/day its countdown needs)]. A course within cram_days of a
-        deadline takes what it needs; the others share the budget, nearest deadline first."""
-        required, urgency, last_day = {}, {}, set()
+        goals_left: [(goal, days left (1 or more), cards/day its countdown needs)]. A course within
+        cram_days of a deadline takes what it needs; the others share the budget, nearest deadline
+        first. exam_courses have an exam that day: no casual or budget floor, since their new cards
+        would be that exam's; only their other goals' countdowns add any."""
+        required, urgency, day_before = {}, {}, set()
         for g, left, rate in goals_left:
             required[g['course']] = max(required.get(g['course'], 0), rate)
             urgency[g['course']] = min(urgency.get(g['course'], 10 ** 6), left)
-            if left <= 1:
-                last_day.add(g['course'])
+            if left == 1:
+                day_before.add(g['course'])
         out, remaining_cap, urgent_takes = {}, total_cap, {}
         claimed = 0  # new cards/day the courses so far would take with no budget limit
         for code in sorted(planned_codes, key=lambda c: (urgency.get(c, 10 ** 6), c)):
@@ -296,6 +308,8 @@ def plan(state):
             floor = int(cfg['casual_new_per_day']) if pool.get(code) else 0
             if code in budget_courses:
                 floor = max(floor, int(cfg['budget_new_per_day']))
+            if code in exam_courses:
+                floor = 0
             want = max(need, floor)
             urgent = urgency.get(code, 10 ** 6) <= int(cfg['cram_days'])
             if overdue.get(code, 0) > int(cfg['backlog_overdue_threshold']) and not urgent:
@@ -315,8 +329,9 @@ def plan(state):
                                                    total_cap, calibration))
             claimed += want
             remaining_cap -= granted
-            # The last day's limit is also set as "today only", so it lapses if the next run doesn't happen.
-            out[code] = (granted, granted if urgent and code in last_day else None)
+            # On the day before an exam the limit is also set as "today only", so that big day's limit
+            # lapses if the next run doesn't happen.
+            out[code] = (granted, granted if urgent and code in day_before else None)
         return out
 
     new_pool, overdue = {}, {}
@@ -328,7 +343,7 @@ def plan(state):
         overdue[code] = sum(1 for c in cards if c['type'] == 2 and c['queue'] == 2 and today_num is not None
                             and c['due'] < today_num)
     todays = allocate([(g, g['days_left'], g['required_new_per_day']) for g in deadline_goals], new_pool, overdue,
-                      warn=True)
+                      {g['course'] for g in exam_today}, warn=True)
     course_out = {}
     for code in codes:
         if code in fixed:
@@ -400,7 +415,8 @@ def plan(state):
         days_lessons.append(todays)
 
     # ---- push: verified lessons whose new cards may enter Anki ------------------------------------
-    cram_goals = [g for g in deadline_goals if g['cram']]
+    cram_goals = [g for g in deadline_goals if g['cram']]  # pushes cards ungated; not on the exam day
+    deck_goals = [g for g in exam_today + deadline_goals if g['cram']]  # cram deck and calendar line
     push = []
     for l in lessons:
         if not l['verified'] or not (unpushed(l) or outdated(l)):
@@ -416,7 +432,7 @@ def plan(state):
             inbox.append(f"{l['title']} isn't verified yet: run the verification pass.")
 
     cram = []
-    for g in cram_goals:
+    for g in deck_goals:
         if g['days_left'] <= int(cfg['cram_days']):
             cram.append(dict(name=cram_name(g), limit=9999,
                              search=f'deck:"{g["course"]}" tag:{g["course"]}::exam::{g["id"]} prop:r<0.85'))
@@ -440,8 +456,9 @@ def plan(state):
         else:  # a later day: deadlines are k days nearer and the cards shown so far are seen (reviews assumed done)
             left = [(g, g['days_left'] - k,
                      countdown(max(0, g['cumulative'] - introduced.get(g['course'], 0)), g['days_left'] - k))
-                    for g in deadline_goals if g['days_left'] >= k]
-            rates = {code: granted for code, (granted, _) in allocate(left, pool, {}).items()}
+                    for g in deadline_goals if g['days_left'] > k]
+            exams = {g['course'] for g in deadline_goals if g['days_left'] == k}
+            rates = {code: granted for code, (granted, _) in allocate(left, pool, {}, exams).items()}
         for code, out in course_out.items():
             course = courses.get(code) or {}
             used = min(rates.get(code, 0), pool[code])
@@ -464,7 +481,7 @@ def plan(state):
         title = f"[studious] Daily quota: {plural(cards_total, 'card')} · {plural(len(todays), 'lesson')}"
         lines = ['Today', f"• Anki: {plural(cards_total, 'card')}"]
         lines += [f"• Lesson: {l['title']}" for l in todays] or ['• Lesson: none']
-        for g in cram_goals:
+        for g in deck_goals:
             left = g['days_left'] - k
             if left >= 0:
                 lines.append(f"• Cram: {g['course']} {g['id']} ({'today' if left == 0 else plural(left, 'day') + ' left'})")
