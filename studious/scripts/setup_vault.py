@@ -22,7 +22,7 @@ SNIPPET = """.callout[data-callout="card"] { --callout-color: 59, 110, 165; --ca
 IGNORES = ['.obsidian/workspace*.json', '.trash/', '.DS_Store']
 CONFIG = """---
 # studious settings. See references/onboarding.md in the skill for every key.
-anki_profile: testing
+anki_profile:
 anki_port: 8765
 timezone: America/New_York
 calendar_id:

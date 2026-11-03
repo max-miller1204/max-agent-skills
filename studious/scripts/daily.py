@@ -12,8 +12,8 @@
 3. Snapshot and plan; push the cards of lessons marked done (or all in-scope cards in cram mode),
    and edits and retags of cards already in Anki; re-snapshot and re-plan if anything was pushed.
 4. Apply the plan to Anki: new cards/day per course, today-only overrides, reposition, cram decks.
-5. Regenerate the timetables, write the calendar events and the inbox.
-6. Commit the vault (local git), AnkiWeb sync again, quit Anki if this run started it.
+5. Regenerate the timetables, write the calendar events.
+6. AnkiWeb sync again, quit Anki if this run started it, write the inbox, commit the vault (local git).
 7. Write a run log outside the vault, to ~/.local/state/studious/runs/<vault>/ (the last 60 are kept).
 
 Prints a JSON summary; exits 1 if any step failed (the failure is in the inbox too, and so are notes
@@ -143,7 +143,11 @@ class Run:
             if self.dry_run:
                 report.append(dict(lesson=item['path'], dryRun=True))
                 continue
-            report += anki.push(self.client, str(self.vault), [str(self.vault / item['path'])], ungated=item['ungated'])
+            try:
+                report += anki.push(self.client, str(self.vault), [str(self.vault / item['path'])],
+                                    ungated=item['ungated'])
+            except Exception as exc:  # one lesson's failure doesn't stop the others
+                report.append(dict(lesson=item['path'], errors=[str(exc)]))
         self.pushed = any(r.get('created') or r.get('updated') for r in report)
         problems = [f"{r['lesson']}: {e}" for r in report for e in r.get('errors') or []]
         if problems:
@@ -271,9 +275,13 @@ class Run:
         if self.dry_run or not (self.vault / '.git').exists():
             return 'skipped'
         subprocess.run(['git', '-C', str(self.vault), 'add', '-A'], check=True)
+        if subprocess.run(['git', '-C', str(self.vault), 'diff', '--cached', '--quiet']).returncode == 0:
+            return 'nothing to commit'
         result = subprocess.run(['git', '-C', str(self.vault), 'commit', '-q', '-m', 'studious: daily run'],
                                 capture_output=True, text=True)
-        return 'committed' if result.returncode == 0 else 'nothing to commit'
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or 'git commit failed')
+        return 'committed'
 
     def quit_anki(self):
         if self.launched_anki:
@@ -309,14 +317,14 @@ def main(argv=None):
             run.step('calendar', run.calendar_sync, plan)
     except StopRun:
         pass
-    run.write_inbox(plan)
-    summary = dict(date=datetime.date.today().isoformat(), dryRun=args.dry_run, steps=run.steps, notes=run.notes,
-                   errors=run.errors, today=(plan or {}).get('days', [{}])[0].get('title'))
-    run.step('commit vault', run.commit)
     if not any(s['step'] == 'anki' and not s['ok'] for s in run.steps):
         run.step('anki sync (after)', run.anki_sync)
         run.step('quit anki', run.quit_anki)
-    summary.update(steps=run.steps, errors=run.errors)
+    run.write_inbox(plan)  # after every step that talks to Anki, so their failures are in it
+    if run.step('commit vault', run.commit) is None:
+        run.write_inbox(plan)  # left uncommitted, so it can say the commit failed
+    summary = dict(date=datetime.date.today().isoformat(), dryRun=args.dry_run, steps=run.steps, notes=run.notes,
+                   errors=run.errors, today=(plan or {}).get('days', [{}])[0].get('title'))
     run.write_log(summary)
     print(json.dumps(summary, indent=2))
     return 1 if run.errors else 0

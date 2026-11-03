@@ -268,6 +268,21 @@ def test_push_records_what_snapshot_fingerprints(tmp_path):
     assert sum(record[g] != h for g, h in changed.items()) == 1  # only the edited card
 
 
+def test_push_reports_a_refusal_and_goes_on_to_the_next_lesson(tmp_path):
+    class Refusing(FakeAnki):
+        def call(self, action, **params):
+            if action == 'studiousNotes' and any(g.startswith('cs3214_aaaa') for g in params['guids']):
+                raise anki.Refused('collection is busy')
+            return super().call(action, **params)
+
+    first = write_lesson(tmp_path, LESSON.replace('done: false', 'done: true'))
+    second = first.with_name('08-semaphores.md')
+    second.write_text(LESSON.replace('done: false', 'done: true').replace('cs3214_aaaaaaaaaaaa', 'cs3214_bbbbbbbbbbbb'))
+    report = anki.push(Refusing(), str(tmp_path), [str(first.parent)])
+    assert report[0]['errors'] == ['collection is busy'] and report[0]['created'] == 0
+    assert report[1]['errors'] == [] and report[1]['created'] == 2
+
+
 def test_snapshot_spells_course_codes_as_the_config_does():
     sspec = importlib.util.spec_from_file_location('snapshot', SCRIPTS / 'snapshot.py')
     snapshot = importlib.util.module_from_spec(sspec)

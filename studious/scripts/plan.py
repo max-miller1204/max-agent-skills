@@ -22,7 +22,7 @@ Rules (Anki and FSRS guidance on workload, plus lesson pacing):
   fit switches to cram mode: lessons may run until the day before (all of them scheduled, over the
   per-day cap if need be, with a warning), cards are pushed without waiting
   for lessons, and for the last `cram_days` a filtered deck of its weakest cards is built. A goal
-  that leaves cram mode loses its cram deck.
+  that leaves cram mode, or is archived or done, loses its cram deck.
 - Only verified lessons are scheduled to read; unverified ones wait in the inbox.
 - A lesson whose cards in Anki are out of date is pushed again: a card block edited since its last
   push (state `pushed`), or exam tags that differ from its `goals` (a goal carried or dropped).
@@ -153,7 +153,7 @@ def budget_warning(code, required, granted, claimed, urgent_takes, own_open, tot
     minutes = minutes_for(claimed + required, calibration)
     head = f"{code}: needs {required} new cards/day to finish in time, but "
     taken = sum(n for n, _ in urgent_takes.values())
-    if taken < total_cap:
+    if taken < total_cap or not urgent_takes:  # no urgent course to blame (a budget of 0 is all taken)
         return head + (f"the daily budget leaves {granted}. Raise anki_minutes_per_day to {minutes} "
                        f"or cut scope.")
     hogs = sorted(urgent_takes.items(), key=lambda kv: (kv[1][1], kv[0]))
@@ -215,6 +215,7 @@ def plan(state):
     cram_delete = []
     for g in sorted(state.get('goals') or [], key=lambda g: (g.get('date') or '9999', g['course'], g['id'])):
         if g.get('status', 'active') != 'active':
+            cram_delete.append(cram_name(g))  # archived or done, maybe before the run after its exam
             continue
         if g['course'] in retired:
             cram_delete.append(cram_name(g))

@@ -458,7 +458,11 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
                 entry['errors'].append(f"line {card['line'] + 1} ({card['title'][:50]}): {exc}")
         if entry['errors']:
             continue
-        existing = {n['guid'] for n in anki.call('studiousNotes', guids=[n['guid'] for n in notes])} if notes else set()
+        try:
+            existing = {n['guid'] for n in anki.call('studiousNotes', guids=[n['guid'] for n in notes])} if notes else set()
+        except Refused as exc:
+            entry['errors'].append(str(exc))
+            continue
         gate_open = ungated or bool(lesson.get('done'))
         send = [n for n in notes if n['guid'] in existing or gate_open]
         entry['held'] = len(notes) - len(send)
@@ -468,7 +472,11 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
         if converter.media:
             files = [dict(filename=name, data=base64.b64encode(p.read_bytes()).decode())
                      for name, p in converter.media.items()]
-            stored = {s['filename']: s['stored'] for s in anki.call('studiousStoreMedia', files=files)}
+            try:
+                stored = {s['filename']: s['stored'] for s in anki.call('studiousStoreMedia', files=files)}
+            except Refused as exc:
+                entry['errors'].append(str(exc))
+                continue
             for note in send:
                 for k, v in note['fields'].items():
                     for name, actual in stored.items():

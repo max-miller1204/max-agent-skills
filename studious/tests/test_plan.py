@@ -189,6 +189,22 @@ def test_past_goal_asks_and_removes_cram_deck():
     assert p['cram_delete'] == ['CS3214::Test2 cram']
 
 
+def test_archived_or_done_goal_loses_its_cram_deck():
+    cards = [card(i, goals=['Test2']) for i in range(10)]
+    for status in ('archived', 'done'):  # e.g. archived on its exam day, before the next run
+        p = planner.plan(state([goal(date='2026-11-01', cram=True, status=status)],
+                               courses={'CS3214': course(cards)}))
+        assert p['cram'] == [] and p['cram_delete'] == ['CS3214::Test2 cram']
+
+
+def test_no_budget_warns_instead_of_failing():
+    cards = [card(i, goals=['Test2']) for i in range(40)]
+    p = planner.plan(state([goal(date='2026-11-11')], courses={'CS3214': course(cards)}, anki_minutes_per_day=0))
+    assert p['courses']['CS3214']['new_per_day'] == 0
+    assert ("CS3214: needs 5 new cards/day to finish in time, but the daily budget leaves 0. "
+            "Raise anki_minutes_per_day to 9 or cut scope.") in p['warnings']
+
+
 def test_goal_without_material_reminds_within_21_days():
     p = planner.plan(state([goal(date='2026-11-15')]))
     assert any('no material yet' in i for i in p['inbox'])
