@@ -343,3 +343,29 @@ def test_cram_schedules_every_lesson_over_the_cap():
     days = [len(d['lessons']) for d in p['days'][:3]]
     assert days == [5, 4, 0]
     assert any('all are scheduled' in w for w in p['warnings'])
+
+
+def carried(pushed=3, tags=('Test2',)):
+    """Lesson 1 was pushed during the Test2 cram, then carried into the Final; Test2 is over."""
+    l = lesson(1, goals=('Test2', 'Final'), pushed=True)
+    for c in l['cards'][pushed:]:
+        c['guid'] = None
+    cards = [card(i + 1, guid=c['guid'], goals=tags, type_=2, due=TODAY_NUM + 30)
+             for i, c in enumerate(l['cards']) if c['guid']]
+    return state([goal(date='2026-10-30'), goal('Final', date='2026-12-10')], [l], {'CS3214': course(cards)})
+
+
+def test_carried_lesson_is_pushed_again_to_retag_its_cards():
+    p = planner.plan(carried())
+    assert p['push'] == [dict(path='courses/CS3214/lessons/01-l1.md', ungated=False)]
+
+
+def test_lesson_with_matching_tags_is_not_pushed_again():
+    p = planner.plan(carried(tags=('Test2', 'Final')))
+    assert p['push'] == []
+
+
+def test_retagging_an_unread_lesson_does_not_release_its_held_cards():
+    p = planner.plan(carried(pushed=2))
+    assert p['push'] == [dict(path='courses/CS3214/lessons/01-l1.md', ungated=False)]
+    assert p['days'][0]['new'] == 0

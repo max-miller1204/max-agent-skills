@@ -20,6 +20,8 @@ Rules (Anki and FSRS guidance on workload, plus lesson pacing):
   fit switches to cram mode: lessons may run until the day before (all of them scheduled, over the
   per-day cap if need be, with a warning), cards are pushed without waiting
   for lessons, and for the last `cram_days` a filtered deck of its weakest cards is built.
+- A lesson whose cards in Anki carry other exam tags than its `goals` (a goal carried or dropped) is
+  pushed again to retag them; unless it's done or in cram, only the cards already in Anki are updated.
 - A course with new cards but no deadline pressure gets `casual_new_per_day`.
 - A course marked `done: true` in the config gets no new cards (its decks move to the done preset).
 - A course marked `retired: true` drops out of planning (no lessons, pushes, goals or inbox items) and
@@ -170,6 +172,16 @@ def plan(state):
     def unpushed(lesson):
         guids = anki_guids.get(lesson['course'], set())
         return sum(c['count'] for c in lesson['cards'] if not c['guid'] or c['guid'] not in guids)
+
+    anki_exam_tags = {code: {c['guid']: {t.lower() for t in c.get('tags') or []
+                                         if t.lower().startswith(f'{code.lower()}::exam::')}
+                             for c in course.get('cards') or []} for code, course in courses.items()}
+
+    def stale_tags(lesson):
+        """Cards already in Anki whose exam tags no longer match the lesson's goals."""
+        tags = anki_exam_tags.get(lesson['course'], {})
+        want = {exam_tag(dict(course=lesson['course'], id=g)) for g in lesson['goals']}
+        return any(c['guid'] in tags and tags[c['guid']] != want for c in lesson['cards'])
 
     # ---- goals ---------------------------------------------------------------------------------
     goals_out, active = [], []
@@ -341,12 +353,14 @@ def plan(state):
     cram_goals = [g for g in deadline_goals if g['cram']]
     push = []
     for l in lessons:
-        if not l['verified'] or not unpushed(l):
+        if not l['verified'] or not (unpushed(l) or stale_tags(l)):
             continue
         if l['done']:
             push.append(dict(path=l['path'], ungated=False))
         elif any(l['course'] == g['course'] and g['id'] in l['goals'] for g in cram_goals):
             push.append(dict(path=l['path'], ungated=True))
+        elif stale_tags(l):  # the gate stays shut: only the cards already in Anki are retagged
+            push.append(dict(path=l['path'], ungated=False))
     for l in lessons:
         if not l['verified'] and l['cards']:
             inbox.append(f"{l['title']} isn't verified yet: run the verification pass.")
@@ -359,7 +373,7 @@ def plan(state):
 
     # ---- the next days: card counts and calendar text ---------------------------------------------
     pool = {code: out['new_pool'] for code, out in course_out.items()}
-    pushed_now = {p['path'] for p in push}
+    pushed_now = {p['path'] for p in push if p['ungated'] or by_path[p['path']]['done']}  # not just retagged
     for p in pushed_now:  # this run pushes these, so their cards are in today's pool
         pool[by_path[p]['course']] = pool.get(by_path[p]['course'], 0) + unpushed(by_path[p])
     days = []

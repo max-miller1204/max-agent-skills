@@ -35,7 +35,7 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
    prints (installs and sign-ins are theirs to do). Warnings don't block.
 2. **Inbox.** Read `studious/inbox.md` and settle each item with the user:
    - past deadline → keep (leave the cards), archive (`status: archived` in the goal), or carry
-     into a later goal (add that goal id to the lessons' `goals`);
+     into a later goal (add that goal id to the lessons' `goals`; the next run retags their cards in Anki);
    - unverified lesson → run the verification pass (references/verify.md);
    - goal without material → ingest its sources or drop the goal;
    - problems from the last run → fix the cause, rerun the failed step.
