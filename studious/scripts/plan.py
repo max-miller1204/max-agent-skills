@@ -13,7 +13,8 @@ Rules (Anki and FSRS guidance on workload, plus lesson pacing):
 - Overdue reviews above the backlog threshold -> no new cards for that course until they're done,
   unless one of its goals is within the cram window.
 - Deadline countdown: new/day = ceil(unseen in scope / (days left - 1)), so every card is seen by the
-  day before; with 1 day or less, every remaining card goes in today (the "today only" override).
+  day before; on the day before, every remaining card goes in today (the "today only" override),
+  and on the exam day none do (the course keeps its other goals' pace or the casual one).
   Overlapping goals of one course count the union of their scopes, nearest deadline first.
 - Lessons are paced to be done `lesson_buffer_days` before the deadline, at most
   `max_lessons_per_day` across all goals, nearest deadline first. A goal whose lessons or cards don't
@@ -64,8 +65,11 @@ def in_scope(card, goal):
 
 
 def countdown(unseen, days_left):
-    """New cards/day so every unseen card is seen by the day before the deadline."""
-    return unseen if days_left <= 1 else math.ceil(unseen / (days_left - 1))
+    """New cards/day so every unseen card is seen by the day before the deadline. On the exam day
+    itself it's too late for new cards: none (due reviews and the cram deck stay)."""
+    if days_left <= 0:
+        return 0
+    return unseen if days_left == 1 else math.ceil(unseen / (days_left - 1))
 
 
 def plural(n, word):

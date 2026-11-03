@@ -216,6 +216,14 @@ def test_future_days_count_due_reviews():
     assert [d['due'] for d in p['days'][:3]] == [0, 0, 2]
 
 
+def test_no_new_cards_for_a_goal_on_its_exam_day():
+    cards = [card(i, goals=['Test2']) for i in range(40)]
+    p = planner.plan(state([goal(date='2026-11-01', cram=True)], courses={'CS3214': course(cards)}))
+    assert p['goals'][0]['required_new_per_day'] == 0
+    assert p['courses']['CS3214']['new_per_day'] == 5  # the casual pace, not all 40
+    assert [d['name'] for d in p['cram']] == ['CS3214::Test2 cram']  # weak cards to look over that morning
+
+
 def test_new_cards_come_back_the_next_day():
     cards = [card(i, goals=['Test2']) for i in range(40)]
     p = planner.plan(state([goal(date='2026-11-02')], courses={'CS3214': course(cards)}))
