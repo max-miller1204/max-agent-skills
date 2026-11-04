@@ -209,8 +209,11 @@ Use the studious skill in daily mode: run `uv run ~/.agents/skills/studious/scri
 ```
 
 Another scheduler works the same way: it only needs to run that command (with `STUDIOUS_VAULT` if
-the vault isn't `~/studious`) in the user's desktop session, so Anki can start if it's closed. Never
-publish the vault's git repository from the scheduler's UI.
+the vault isn't `~/studious`) on that machine while the user is logged in to its desktop (a locked
+or blank screen is fine). The job doesn't need the desktop's display itself: when Anki is closed and
+the job has no `DISPLAY` or `WAYLAND_DISPLAY` (t3, cron), the run borrows them from the user's
+systemd manager (`systemctl --user show-environment`) to start Anki. Never publish the vault's git
+repository from the scheduler's UI.
 
 ## 6. Switching to the real Anki profile
 

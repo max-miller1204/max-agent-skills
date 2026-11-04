@@ -19,7 +19,7 @@ DATES = ['2027-01-04', '2027-01-05', '2027-01-06']
 
 def plan(title_suffix=''):
     return dict(today=DATES[0], days=[dict(date=d, title=f'[studious] Daily quota: {i} cards · 0 lessons{title_suffix}',
-                                           description=f'Today\n• Anki: {i} cards\n• Lesson: none') for i, d in enumerate(DATES)])
+                                           description=f'Today\n• Anki: {i} cards\n• Lessons: none') for i, d in enumerate(DATES)])
 
 
 def main():

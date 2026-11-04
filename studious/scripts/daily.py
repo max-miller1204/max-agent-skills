@@ -35,6 +35,75 @@ HERE = Path(__file__).resolve().parent
 KEEP_LOGS = 60
 
 
+DESKTOP_VARS = ('DISPLAY', 'WAYLAND_DISPLAY', 'XDG_SESSION_TYPE', 'XDG_CURRENT_DESKTOP', 'XDG_RUNTIME_DIR',
+                'DBUS_SESSION_BUS_ADDRESS', 'XAUTHORITY')
+
+
+def user_manager_env(env):
+    """The user systemd manager's environment, where the logged-in desktop session leaves its display
+    variables, as (dict, None) or (None, why it couldn't be read)."""
+    if not shutil.which('systemctl'):
+        return None, 'systemctl not found'
+    call_env = dict(env)
+    if not call_env.get('XDG_RUNTIME_DIR'):  # cron leaves it unset, and systemctl --user needs it to find the bus
+        call_env['XDG_RUNTIME_DIR'] = f'/run/user/{os.getuid()}'
+    error = None
+    for extra in (['-o', 'json'], []):  # JSON keeps values exact; older systemd only prints shell-quoted lines
+        try:
+            result = subprocess.run(['systemctl', '--user', 'show-environment', *extra], capture_output=True,
+                                    text=True, env=call_env, timeout=10)
+        except subprocess.TimeoutExpired:
+            return None, 'systemctl --user show-environment timed out'
+        if result.returncode == 0:
+            if extra:
+                return json.loads(result.stdout), None
+            out = {}
+            for line in result.stdout.splitlines():
+                key, sep, value = line.partition('=')
+                if sep and not value.startswith(("$'", "'", '"')):  # a quoted value would be misread: skip it
+                    out[key] = value
+            return out, None
+        error = result.stderr.strip() or f'systemctl exited {result.returncode}'
+    return None, error
+
+
+def display_reachable(env, exists=os.path.exists):
+    """Whether the display the environment names still has a socket (a session that logged out leaves
+    its variables behind in a lingering user manager, but not its sockets)."""
+    wayland = env.get('WAYLAND_DISPLAY')
+    if wayland and exists(wayland if wayland.startswith('/') else os.path.join(env.get('XDG_RUNTIME_DIR') or '', wayland)):
+        return True
+    display = env.get('DISPLAY')
+    if display:
+        if not display.startswith(':'):
+            return True  # host:N, a remote display there's no local socket to check
+        return exists(f"/tmp/.X11-unix/X{display[1:].split('.')[0]}")
+    return False
+
+
+def desktop_env(env=None, manager=None, system=None, exists=os.path.exists):
+    """The environment to start Anki in, and a note on its display (None when there's nothing to say).
+
+    A scheduler that starts the run outside the graphical session (t3's agents run in their own
+    systemd scope, cron in none) leaves DISPLAY and WAYLAND_DISPLAY unset, so Anki can't open a window.
+    The user's systemd manager has the logged-in session's values: they're borrowed as a set, since
+    WAYLAND_DISPLAY is relative to that session's XDG_RUNTIME_DIR."""
+    env = dict(os.environ if env is None else env)
+    if (system or platform.system()) != 'Linux' or env.get('DISPLAY') or env.get('WAYLAND_DISPLAY'):
+        return env, None
+    if manager is None:
+        manager, error = user_manager_env(env)
+        if manager is None:
+            return env, f"this job has no display and the desktop session's couldn't be read ({error})"
+    borrowed = {k: manager[k] for k in DESKTOP_VARS if manager.get(k)}
+    if not (borrowed.get('DISPLAY') or borrowed.get('WAYLAND_DISPLAY')):
+        return env, 'this job has no display and no desktop session is logged in'
+    candidate = {**env, **borrowed}
+    if not display_reachable(candidate, exists):
+        return env, 'this job has no display and the desktop session it would borrow is gone (logged out?)'
+    return candidate, "it was started on the logged-in desktop's display"
+
+
 def load(name, file):
     spec = importlib.util.spec_from_file_location(name, HERE / file)
     module = importlib.util.module_from_spec(spec)
@@ -101,8 +170,9 @@ class Run:
                 else ['anki', '-p', self.client.profile])
             if isinstance(command, str):
                 command = command.replace('{profile}', self.client.profile).split()
+            env, display_note = desktop_env()
             subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             start_new_session=True)
+                             start_new_session=True, env=env)
             self.launched_anki = True
             for _ in range(60):
                 time.sleep(1)
@@ -112,7 +182,7 @@ class Run:
                 except anki.Refused:
                     continue
             else:
-                raise RuntimeError('Anki did not start (is a desktop session available to this job?)')
+                raise RuntimeError('Anki did not start within 60 s' + (f': {display_note}' if display_note else ''))
         if version['profile'] != self.client.profile:
             raise RuntimeError(f"Anki is open on profile {version['profile']!r}, not {self.client.profile!r}")
         return version

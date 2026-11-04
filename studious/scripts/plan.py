@@ -76,6 +76,7 @@ def plural(n, word):
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
+INDENT = '\u00a0' * 4  # calendar sub-bullets
 SPAN = 14  # days after a card is shown whose load decides where it goes (most of its early reviews)
 OBSOLETE_KEYS = ('anki_minutes_per_day', 'seconds_per_review', 'reviews_per_new_card')
 
@@ -518,7 +519,9 @@ def plan(state):
         todays = [by_path[p] for p in days_lessons[k]]
         title = f"[studious] Daily quota: {plural(cards_total, 'card')} · {plural(len(todays), 'lesson')}"
         lines = ['Today', f"• Anki: {plural(cards_total, 'card')}"]
-        lines += [f"• Lesson: {l['title']}" for l in todays] or ['• Lesson: none']
+        # Sub-bullets are indented with no-break spaces: Calendar's description view collapses plain ones.
+        lines += ([f"• {'Lesson' if len(todays) == 1 else 'Lessons'}:"] + [f"{INDENT}- {l['title']}" for l in todays]
+                  if todays else ['• Lessons: none'])
         for g in deck_goals:
             left = g['days_left'] - k
             if left >= 0:

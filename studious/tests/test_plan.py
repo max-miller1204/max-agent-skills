@@ -237,10 +237,20 @@ def test_event_text_format():
     d = p['days'][0]
     n = d['new'] + 5  # new + 5 due
     assert d['title'] == f'[studious] Daily quota: {n} cards · 1 lesson' and d['cards'] == n
-    assert d['description'].split('\n')[:3] == ['Today', f'• Anki: {n} cards', '• Lesson: conditionvariables']
+    assert d['description'].split('\n')[:4] == ['Today', f'• Anki: {n} cards', '• Lesson:',
+                                                '\u00a0' * 4 + '- conditionvariables']
     assert 'obsidian://' not in d['description']
     empty = p['days'][-1]
-    assert '• Lesson: none' in empty['description'] and empty['title'].endswith('· 0 lessons')
+    assert '• Lessons: none' in empty['description'] and empty['title'].endswith('· 0 lessons')
+
+
+def test_event_text_lists_several_lessons_under_one_header():
+    ls = [lesson(n, cards=0) for n in (7, 8, 9, 10)]
+    p = planner.plan(state([goal(date='2026-11-04')], ls, max_lessons_per_day=2, lesson_buffer_days=0))
+    d = p['days'][0]
+    assert d['title'].endswith('· 2 lessons')
+    assert d['description'].split('\n')[2:5] == ['• Lessons:', '\u00a0' * 4 + '- lesson7', '\u00a0' * 4 + '- lesson8']
+    assert '• Lesson:' not in d['description']
 
 
 def test_future_days_count_due_reviews():
