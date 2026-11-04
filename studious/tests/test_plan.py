@@ -136,16 +136,16 @@ def test_a_deadline_is_spread_instead_of_piling_up_at_the_end():
     cards = [card(i, course='CMDA3654', goals=['Quiz3']) for i in range(131)]
     p = planner.plan(state([goal('Quiz3', 'CMDA3654', '2026-11-04')],
                            courses={'CMDA3654': course(cards, code='CMDA3654')}))
-    new = [d['new'] for d in p['days'][:4]]
-    assert sum(new[:3]) == 131 and new[3] == 0  # through the day before the quiz, none on the day itself
-    assert min(new[:3]) > 20 and p['warnings'] == []
+    new = [d['new'] for d in p['days'][:3]]
+    assert sum(new[:2]) == 131 and abs(new[0] - new[1]) <= 3 and new[2] == 0  # it fits: the day before stays free
+    assert p['warnings'] == []
 
 
 def test_new_cards_go_around_a_busy_day():
     due = [card(500 + i, type_=2, queue=2, due=TODAY_NUM + 1) for i in range(60)]  # 60 reviews tomorrow
     cards = [card(i, goals=['Test2']) for i in range(60)] + due
     p = planner.plan(state([goal(date='2026-11-05')], courses={'CS3214': course(cards)}))
-    new = [d['new'] for d in p['days'][:4]]
+    new = [d['new'] for d in p['days'][:3]]
     assert sum(new) == 60 and new[1] < new[0] and new[1] < new[2]
 
 
@@ -187,7 +187,7 @@ def test_overlapping_goals_count_the_union_once():
     p = planner.plan(state([goal(date='2026-11-06'), goal('Final', date='2026-11-21')],
                            courses={'CS3214': course(shared + later)}))
     by_day = [d['new'] for d in p['days']]
-    assert sum(by_day[:5]) >= 40  # Test2's 40 by the day before it
+    assert sum(by_day[:4]) >= 40  # Test2's 40 by two days before it, since they fit
     assert sum(by_day) < 100  # the Final's 60 more are spread over its 19 days, not all this week
     assert sum(g['unseen'] for g in p['goals']) == 140 and p['courses']['CS3214']['new_per_day'] <= 15
 
@@ -290,7 +290,7 @@ def test_on_pace_goal_gets_no_cram_deck_on_its_exam_day():
 def test_forecast_rests_a_course_on_its_exam_day():
     cards = [card(i, goals=['Test2']) for i in range(10)] + [card(100 + i) for i in range(90)]
     p = planner.plan(state([goal(date='2026-11-03')], courses={'CS3214': course(cards)}))
-    assert [d['new'] for d in p['days'][:4]] == [5, 5, 0, 5]  # countdown over two days, exam day, casual
+    assert [d['new'] for d in p['days'][:4]] == [10, 5, 0, 5]  # countdown, casual, exam day, casual
 
 
 def test_new_cards_come_back_the_next_day():
@@ -469,7 +469,7 @@ def test_timetable_of_a_past_goal_says_days_ago():
 
 
 def test_the_day_before_counts_toward_fitting_under_the_cap():
-    """90 cards, exam in 3 days, 60 a day: three days fit (30 new + 30 back), two would not."""
+    """90 cards, exam in 3 days, 60 a day: two days can't hold them, so the day before takes the rest."""
     cards = [card(i, goals=['Test2']) for i in range(90)]
     p = planner.plan(state([goal(date='2026-11-04')], courses={'CS3214': course(cards)}, cards_per_day=60))
     assert sum(d['new'] for d in p['days'][:3]) == 90 and p['days'][2]['new'] > 0

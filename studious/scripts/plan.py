@@ -17,7 +17,8 @@ Rules (Anki and FSRS guidance on workload, plus lesson pacing):
   course's casual or budget floor fills the room left under the cap.
 - Overdue reviews above the backlog threshold -> no new cards today for that course, unless one of
   its goals is within `cram_days`.
-- Deadline goals: every card in scope is shown by the day before the deadline. If they fit under
+- Deadline goals: every card in scope is shown by the day before the deadline, and by two days
+  before when they fit, so each comes back at least once before the exam. If they fit under
   the cap they stay under it; if they don't, the goal is in cram mode and they go in anyway, on the
   least busy days, with a warning that names the busiest day. On the day before, the limit is also
   set as "today only", so it lapses if the next run doesn't happen. On the exam day the goal is over
@@ -357,7 +358,8 @@ def plan(state):
         return avail, pushed_now
 
     def window(g):
-        """The days a goal's cards may be shown: through the day before its deadline."""
+        """The days a goal's cards may be shown: through the day before its deadline (place() keeps
+        that last day for cards that don't fit earlier)."""
         return min(days_n, g['days_left'])  # days 0 .. days_left - 1; only goals with days_left > 0 get here
 
     def place(avail, soft):
@@ -384,12 +386,23 @@ def plan(state):
                 continue
             need = max(0, g['cumulative'] - sum(shown[code]))
             days = [t for t in range(window(g)) if not (t == 0 and code in backlog)]
+            # The day before the exam only takes what doesn't fit earlier: a card shown by two days
+            # before comes back at least once before the exam.
+            early = [t for t in days if t != g['days_left'] - 1] or days
             today_n, over, left = 0, False, need
             chunk = max(1, math.ceil(need / 60))
             while left > 0:
                 x = min(chunk, left)
                 room = slack(code)
-                fitting = [t for t in days if room[t] >= x and load.fits(t, x)]
+
+                def fit(ts):
+                    return [t for t in ts if room[t] >= x and load.fits(t, x)]
+
+                fitting = fit(early)
+                if not fitting and x > 1 and early != days:
+                    chunk = 1  # fill the earlier days card by card before using the day before
+                    continue
+                fitting = fitting or fit(days)
                 options = fitting or ([t for t in days if room[t] >= x] if soft else [])
                 if not options:
                     if x > 1:
