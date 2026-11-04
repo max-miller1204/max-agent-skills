@@ -290,3 +290,23 @@ def test_snapshot_spells_course_codes_as_the_config_does():
     items = [dict(course='cs3214'), dict(course='Other')]
     snapshot.spell_courses({'courses': {'CS3214': {}}}, items)
     assert [i['course'] for i in items] == ['CS3214', 'Other']
+
+
+def test_daily_run_stopped_before_anki_leaves_anki_alone(tmp_path, monkeypatch, capsys):
+    dspec = importlib.util.spec_from_file_location('daily', SCRIPTS / 'daily.py')
+    daily = importlib.util.module_from_spec(dspec)
+    dspec.loader.exec_module(daily)
+    (tmp_path / 'studious').mkdir()
+    (tmp_path / 'studious/config.md').write_text('---\nanki_profile: Max\n---\n')
+
+    def stale(self):
+        raise RuntimeError('studious-obsidian-sync is inactive')
+
+    def no_anki(*args, **kwargs):
+        raise AssertionError('Anki was called after the run stopped')
+
+    monkeypatch.setattr(daily.Run, 'obsidian_sync', stale)
+    monkeypatch.setattr(daily.anki.Anki, 'call', no_anki)
+    assert daily.main(['--vault', str(tmp_path), '--dry-run']) == 1
+    summary = json.loads(capsys.readouterr().out)
+    assert summary['errors'] == ['obsidian sync: studious-obsidian-sync is inactive']

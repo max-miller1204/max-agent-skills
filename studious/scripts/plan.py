@@ -358,7 +358,7 @@ def plan(state):
 
     def window(g):
         """The days a goal's cards may be shown: through the day before its deadline."""
-        return min(days_n, max(1, g['days_left'] - 1))
+        return min(days_n, g['days_left'])  # days 0 .. days_left - 1; only goals with days_left > 0 get here
 
     def place(avail, soft):
         """Place every deadline's cards, then the casual floors. Returns the load, new cards per course
@@ -438,7 +438,7 @@ def plan(state):
         today_n, left, over = result.get((g['course'], g['id']), [0, 0, False])
         g['required_new_per_day'] = today_n
         if over:
-            span = range(0, min(days_n, window(g) + 2))
+            span = range(0, min(days_n, window(g) + 1))  # through the exam day
             busiest = max(span, key=lambda k: (load.load[k], -k))
             date = today + datetime.timedelta(days=busiest)
             peak = math.ceil(load.load[busiest] - 1e-6)

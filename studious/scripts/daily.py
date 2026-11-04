@@ -317,7 +317,7 @@ def main(argv=None):
             run.step('calendar', run.calendar_sync, plan)
     except StopRun:
         pass
-    if not any(s['step'] == 'anki' and not s['ok'] for s in run.steps):
+    if any(s['step'] == 'anki' and s['ok'] for s in run.steps):  # not when the run stopped before Anki
         run.step('anki sync (after)', run.anki_sync)
         run.step('quit anki', run.quit_anki)
     run.write_inbox(plan)  # after every step that talks to Anki, so their failures are in it
