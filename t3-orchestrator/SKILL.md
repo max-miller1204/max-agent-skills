@@ -21,11 +21,17 @@ These are the default approved profiles. If the user selected other and doesn't 
 
 | Profile | Claude | GPT | Reasoning | Use for |
 |---|---|---|---|---|
-| `quick` | `claude-haiku-5-5` | `gpt-6-luna` | low | focused research, routine work |
+| `quick` | `claude-haiku-5-5` | `gpt-6-luna` | low | focused research, and self-contained work that needs nothing from this thread (docs, translations, browser checks) |
 | `balanced` | `claude-opus-5-5` | `gpt-6.1-sol` | medium | general implementation |
 | `deep` | `claude-fable-5-1` | `gpt-6-astra` | high | ONLY when the user requests it |
 
 After delegating, confirm that the result's `providerInstanceId` and `model` match what you requested. If they don't match, tell the user. If a provider or model is unavailable, say so. Never switch to another one unasked.
+
+## Splitting the work
+
+- One spec goes to one implementation child, which builds all of it. Never split one spec across children by layer (backend, frontend, tests) or by step: what one child learns mid-build never reaches the others.
+- Run implementation children in parallel only for separate specs that don't touch the same files, data or decisions. Otherwise run them one after another, each starting from the last one merged.
+- A project split into an MVP and branches: delegate the MVP first. Delegate a branch only after the MVP merges and the branch has its own spec, written against the merged code.
 
 ## Delegating
 
@@ -34,8 +40,8 @@ After delegating, confirm that the result's `providerInstanceId` and `model` mat
 - Use `mode: "async"` (the default). Use `mode: "wait"` only when this turn cannot continue without the result.
 - Give each task its own `clientRequestId`, and reuse it only when retrying that same call.
 - A child receives only the `task` text, none of this conversation. Write self-contained tasks: the goal, links to relevant files or specs, constraints, and what "done" means.
-- Every task ends with: "Do the work yourself and start no subagents. When done, report: what changed, verification results, what the user must do, and open decisions."
-- For follow-up work in the same piece of work, send it to the child with `t3_thread_send` on its `childThreadId`. A new review or re-check is a new `delegate_task` with the original brief, prior findings, and open objections.
+- Every task ends with: "Do the work yourself. Start no subagents to build parts of it. You may start fresh ones to review or verify your work (a code review, the repo's prove-* skill). When done, report: what changed, verification results, what the user must do, and open decisions."
+- For follow-up work in the same piece of work, send it to the child with `t3_thread_send` on its `childThreadId`. A new review or re-check is a new `delegate_task` with the spec, the diff, prior findings, and open objections, not the builder's reasoning. Send its findings back to the original child to fix: it already knows why it built things the way it did.
 - Stop a child you no longer need with `task_cancel`. Never interrupt a child thread directly.
 
 ## Worktrees

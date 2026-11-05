@@ -29,7 +29,7 @@ Status comes from native issue state, so nothing has to keep it in sync:
 
 - Type: labels `bug`, `feature`, `chore`.
 - Priority: labels `urgent`, `high`, `medium`, `low`. At most one per issue.
-- Projects: a parent issue labeled `project` with native sub-issues.
+- Projects: a parent issue labeled `project` with native sub-issues. Each sub-issue is a whole spec (an MVP or a branch built on it), never a slice of one.
 - Blocked by: native issue dependencies.
 - No cycles and no estimates.
 

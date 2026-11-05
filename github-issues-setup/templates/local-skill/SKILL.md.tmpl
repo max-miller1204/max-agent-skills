@@ -94,6 +94,8 @@ A closed blocker no longer blocks.
 
 - Create: `gh issue create -R $R --title "..." --body "Goal and scope" --label project --assignee LEAD`.
 - Add work: `gh issue edit P -R $R --add-sub-issue 12,13`, or create the child with `--parent P`.
+- Each sub-issue is its own spec, built whole by one builder: the MVP, or a branch (a feature added on top of the MVP). Never split one spec into sub-issues by layer (backend, frontend, tests) or by step: what one builder learns mid-build never reaches the others. Keep progress on one spec as a checklist in its body.
+- Branches wait for the MVP: mark each branch `--add-blocked-by <MVP>`. A branch can start in parallel with another only if they don't touch the same files, data or decisions; otherwise block one on the other. Until the MVP merges, a branch's body is just its one-line goal. Write its full spec against the merged code before starting it.
 - Progress:
 
 ```
