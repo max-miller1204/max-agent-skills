@@ -52,7 +52,11 @@ Out of scope: <what it doesn't do>
 Branches: <one line per branch goal, if split>
 Progress:
 - [ ] <checklist the builder ticks as it goes>
+- [ ] Fresh code review (spec + diff only) if the change is hard (auth, money, concurrency, data, shared code) or large; findings fixed in this session
+- [ ] prove-<app> passes, if the repo has one
 ```
+
+Always end Progress with those two lines: the builder does what its own checklist says.
 
 Write each branch as its one-line goal only. It gets its own spec in a short grilling round after the MVP merges, against the real code: a detailed branch spec written now goes stale while the MVP is built.
 
