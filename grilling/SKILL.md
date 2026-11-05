@@ -50,13 +50,12 @@ Decisions: <one line per decision this session settled>
 Acceptance flows: <each way a user or program uses it, and what done looks like for each. This is the answer key the work is checked against>
 Out of scope: <what it doesn't do>
 Branches: <one line per branch goal, if split>
-Progress:
-- [ ] <checklist the builder ticks as it goes>
+Before done:
 - [ ] Fresh code review (spec + diff only) if the change is hard (auth, money, concurrency, data, shared code) or large; findings fixed in this session
 - [ ] prove-<app> passes, if the repo has one
 ```
 
-Always end Progress with those two lines: the builder does what its own checklist says.
+Always include Before done as written: the builder does what its own spec says. Don't list build steps; the builder works those out from the goal and the code.
 
 Write each branch as its one-line goal only. It gets its own spec in a short grilling round after the MVP merges, against the real code: a detailed branch spec written now goes stale while the MVP is built.
 
