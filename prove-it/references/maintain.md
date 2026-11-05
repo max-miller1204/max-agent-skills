@@ -1,15 +1,12 @@
----
-name: maintain-prove-it
-description: Improve a repo's generated verification skill from what its past runs learned. Works on both kinds made by /create-prove-it, the permanent prove-<app> and a temporary prove-<migration>. Reads the receipts in .prove-it/runs/ (failed and blocked steps, retries, the commands that finally worked, steps that failed for reasons unrelated to the change, how each change was sorted into checks) and any bug that slipped past prove, then fixes drifted steps, writes in the working commands, adds the check that would have caught a slipped bug and a section for any new surface. For a temporary skill it checks whether the migration is done and, if so, suggests the end step. Never rewrites an answer key (spec, snapshot, old system) to match the app. Proves every edit live and reports product bugs without touching product code. Use for /maintain-prove-it, "update the verify skill", "the verifier is out of date", "prove missed this bug", "prove keeps failing on unrelated steps", or after a big merge or migration milestone.
----
+# Maintain
 
-# Maintain Prove It
+**Goal:** the project skill matches the app as it is now and catches the bugs that slipped past it, with every edit proved live.
 
 A verification skill goes stale the day the app changes: a route moves, a button gets renamed, a new surface ships with nothing in the skill that reaches it. A stale skill is worse than none, because the next agent will trust it. Every prove run leaves a receipt that shows where the skill struggled. This pass reads those receipts and folds what they learned back into the skill.
 
 ## Rules for the whole pass
 
-- **Only edit the skill's own folder** (SKILL.md, scripts/). Never change product code here.
+- **Only edit the skill's own folder** (SKILL.md, references/, scripts/). Never change product code here.
 - **When the app and the skill disagree, work out which one is wrong.** The skill describing something the app no longer does is either *drift* (the app changed on purpose: fix the skill) or a *product bug* (the app broke: report it, don't rewrite the skill to match the bug). Read the commit that changed it. If you still can't tell, ask.
 - **Answer keys are not the skill's steps.** The user's spec, the snapshots in `.prove-it/snapshots/` and the old system a flow is compared with say what right looks like. A drifted step can be fixed, but an answer key that disagrees with the app is reported to the user, never rewritten to match. Only the user changes one.
 - **Every edit you make to the skill gets proved live before you finish.** An unproven edit is just more drift.
@@ -18,7 +15,7 @@ A verification skill goes stale the day the app changes: a route moves, a button
 
 ## 1. Find the skill
 
-Look for `prove-*` folders under `.claude/skills/` and `.agents/skills/`, at the repo root and in package folders. Prefer ones with the `prove-it:` marker comment. The marker says which kind it is: `permanent skill` (the app, one section per surface) or `temporary migration skill` (one migration, deleted at its end step). If there are several, ask which. If there are none, stop and suggest `/create-prove-it`.
+Find it as SKILL.md says. If there is none, stop and suggest `/prove-it`.
 
 ## 2. Read the past runs
 
@@ -31,8 +28,12 @@ List the receipts in `.prove-it/runs/`, newest first. Start from the runs since 
 - **Scope**: the surfaces each diff reached. A changed path the Scope map doesn't list, or a surface the run drove with no section in the skill, means the map is behind.
 - **What the change touches**: each flow the run listed as new or existing, its answer key, and any smoke test. A run that checked the whole app, skipped an existing flow behind shared code the change touched, or checked a new flow on parity alone when the change edited both sides, means the Sort checklist or the Scope map's shared-code rows need fixing.
 - **Answer keys used**: new flows marked `no answer key` again and again means specs aren't reaching the skill. Say so, and suggest where the user could put them (the PR body, a file in the diff).
+- **Steps that always pass**: a step that needs the agent's judgment (not a script), on a flow of the same kind, that passed in every run you read.
+- **Feature recipes**: a recipe the runs had to work around, a flow the runs drove with no recipe, and a recipe no run used whose feature may be gone.
 
 If there are no receipts, say so. Then the only inputs are reported bugs (step 4) and a fresh run on the current change.
+
+If the user asks for a full sweep, also drive every feature recipe once, in a fresh agent, against its answer key. Only on request: a normal pass checks what the receipts and bugs point to.
 
 ## 3. For a temporary skill, check whether the migration is done
 
@@ -54,9 +55,11 @@ Turn the notes into a list of edits, each tied to the receipt or bug that shows 
 - **New surface or path**: recent diffs added a route, page, command, job or folder the Scope map doesn't reach. Add it to the map. A new path on a known surface goes into that surface's section. A whole new surface gets its own section, with a drive recipe, what it copies (its parity answer key, if an existing surface does the same job) and "Done looks like" notes. Only call it new if you can name the file that adds it.
 - **Shared code moved**: a schema, auth, nav or shared module was added, split or renamed. Update its row in the Scope map so the skill still finds the existing flows behind it.
 - **Removed surface**: take its map row and recipe out, citing the commit that removed it.
+- **Recipe drift**: a feature recipe that runs had to work around, or a feature with no recipe. Update the existing recipe before adding one, organise by feature (never by PR or issue), merge duplicates, and remove a recipe only with the commit that removed its feature. Never remove coverage because a check fails.
 - **Launch changes** (new env var, port, service, migration, dependency): update Start and Health.
 - **Answer key disagrees with the app**: a spec line, a snapshot or the old system no longer matches what the app does. Don't touch it. Report it with the evidence, and the commit that changed the behaviour, so the user can decide whether the app or the answer key is wrong.
 - **Product bug**: the app is really broken. Record it with the evidence. It is for the user, not this pass.
+- **Ceremony to lighten**: a judgment step that passed in at least 10 runs since the skill last changed, on a flow with no slipped bug and no audit miss. Every step encodes a guess about what agents get wrong, and newer models make some guesses stale. Suggest moving that kind of flow from hard to routine in Sort the change, or turning the step into a script. Never remove a scripted check for this reason: scripts are cheap and they are the regression net. Never loosen a check. Apply it only with the user's OK, and suggest `/prove-it audit` plant a bug there next time to confirm.
 
 ## 6. Edit and prove live
 
@@ -69,7 +72,7 @@ When a step fails:
 3. If the app is really broken, that's a product bug: record it with the evidence and move on.
 4. If you can't reach a surface (missing account, missing service), record the exact prerequisite and the route you tried. If the skill didn't mention that prerequisite, that's drift too. Retry previously blocked surfaces whenever the tooling has changed (new seed data, a new driver, a sandbox).
 
-A new check for a slipped bug counts only if it fails on the broken code. If the broken version is still in history, check it out in a scratch worktree under `/tmp` and run the check there. Otherwise suggest `/audit-prove-it` plant that bug next time.
+A new check for a slipped bug counts only if it fails on the broken code. If the broken version is still in history, check it out in a scratch worktree under `/tmp` and run the check there. Otherwise suggest `/prove-it audit` plant that bug next time.
 
 Clean up after the last drive, including after failed attempts. Then check the evidence is still there and nothing you started is still running.
 
@@ -77,6 +80,7 @@ Clean up after the last drive, including after failed attempts. Then check the e
 
 - **Outcome:** `current` (nothing needed changing), `updated` (the skill changed, and every change was proved live) or `blocked` (say exactly what stopped you).
 - What changed in the skill, one line each, with the receipt or bug that called for it.
+- Ceremony you suggest lightening, with the runs that show it, for the user to approve.
 - Product bugs found, with evidence. These are for the user to fix, not this pass.
 - Answer keys that disagree with the app, and answer keys you propose, for the user to approve.
 - For a temporary skill: whether the migration looks done, the evidence, and whether you suggested the end step.

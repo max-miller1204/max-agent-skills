@@ -1,9 +1,6 @@
----
-name: audit-prove-it
-description: Try to fool a repo's verification skill, either kind made by /create-prove-it (the permanent prove-<app> or a temporary prove-<migration>). Plants one deliberate bug at a time in the files the current change touched (or along a flow the user names), and for a migration only in the new system, never the old one it is compared with. A fresh agent then checks that change or flow with the skill and its answer keys, without knowing what was planted. Records whether it caught the bug, reverts exactly, and reports every miss with a suggested fix to the skill and to the flow's answer key. Use for /audit-prove-it, "can the verifier be fooled", "test the verify skill", "is our verification any good", "mutation test the verifier", or after creating or heavily editing a prove-* skill.
----
+# Audit
 
-# Audit Prove It
+**Goal:** a score of how many planted bugs the project skill caught, with a fix proposed for every miss, and the repo exactly as it was.
 
 A verification skill that says PROVED on a broken app is worse than none: it gives false confidence. The only way to know it works is to break the app on purpose and see if it notices. This skill does that, safely, and reports every bug that slipped past.
 
@@ -19,7 +16,7 @@ You are about to edit product code on purpose. These rules keep that from hurtin
 
 ## 1. Find the skill and baseline it
 
-Find the `prove-*` skill (under `.claude/skills/` or `.agents/skills/`, with the `prove-it:` marker comment). If there are none, stop and suggest `/create-prove-it`. The marker says which kind it is.
+Find the project skill as SKILL.md says. If there is none, stop and suggest `/prove-it`.
 
 **For a temporary migration skill, plant bugs in the new system only.** The old system is the answer key. A bug planted there tests nothing, and it can leak into the snapshots the end step records. Its target is the migration's covered areas that have moved or are in progress.
 
@@ -27,11 +24,11 @@ Work out the target. By default it is the current change: the files touched by u
 
 Record `git status --porcelain` so you can compare at the end.
 
-Run the skill once on the untouched target. **It must come back PROVED.** If the clean change already fails, any "catch" later means nothing. Fix that first, or suggest `/maintain-prove-it`, and leave the failing surface out of the audit. Note the surfaces and flows the baseline receipt drove, and how it sorted each one (new or existing flow, and the answer key): that is the scope you hand the blind checker.
+Run the skill once on the untouched target. **It must come back PROVED.** If the clean change already fails, any "catch" later means nothing. Fix that first, or suggest `/prove-it maintain`, and leave the failing surface out of the audit. Note the surfaces and flows the baseline receipt drove, and how it sorted each one (new or existing flow, and the answer key): that is the scope you hand the blind checker.
 
 ## 2. Plan the bugs
 
-Plan 4 to 8 bugs in the target's files, spread across surfaces and layers, so the audit finds the blind spots instead of hitting the same check eight times. Prefer the lines the change itself added or edited: that is where a real bug in this change would be. [references/mutation-catalogue.md](references/mutation-catalogue.md) lists bug types by layer. Aim them at the skill's "Could fool you" notes first, since those are its own admitted weak spots. Put at least one in shared code an existing flow runs through, to test that the skill counts that flow as touched, and, for a surface that copies another, one in the code both sides share, to test whether parity alone misses it.
+Plan 4 to 8 bugs in the target's files, spread across surfaces and layers, so the audit finds the blind spots instead of hitting the same check eight times. Prefer the lines the change itself added or edited: that is where a real bug in this change would be. [references/mutation-catalogue.md](mutation-catalogue.md) lists bug types by layer. Aim them at the skill's "Could fool you" notes first, since those are its own admitted weak spots. Put at least one in shared code an existing flow runs through, to test that the skill counts that flow as touched, and, for a surface that copies another, one in the code both sides share, to test whether parity alone misses it. If the skill sorts flows into hard and routine, put at least one in a flow it marks routine, to test whether its scripted checks alone catch it; a miss there means the line between hard and routine is in the wrong place.
 
 Each bug must be:
 
@@ -46,7 +43,7 @@ Write the plan as a table before you touch anything: id, flow, layer, file, the 
 For each bug:
 
 1. **Back up and plant.** Copy the file to the originals folder, then make the change. Restart the app if the skill's Start section says code changes need a restart.
-2. **Check blind.** The checker must not know what you planted, or it will go looking for it, which proves nothing. If your agent can start a sub-agent (the Agent tool in Claude Code, or a subagent in Codex), give it only this: "Use the `<prove skill name>` skill to prove these flows in this repo: `<the flows and surfaces from the baseline receipt>`, with these checks and answer keys: `<each flow's check and answer key from the baseline receipt, including the spec it found>`. Report PROVED or BROKEN with evidence." No hint about the bug, the file or the layer. The answer keys are not hints: a real checker gets them too. Hand it the flows by name instead of the diff, and tell it not to read `git diff`, `git status`, `git log` or `.prove-it/audits/`: the planted bug sits in the working tree, so any of these would give it away. Tell it to keep any scratch files inside its run folder. If you can't start a sub-agent, run the skill's scripted checks only and mark the result "not blind" in the report.
+2. **Check blind.** The checker must not know what you planted, or it will go looking for it, which proves nothing. If your agent can start a sub-agent (the Agent tool in Claude Code, or a subagent in Codex), give it only this: "Use the `<prove skill name>` skill to prove these flows in this repo: `<the flows, their feature recipes and the surfaces from the baseline receipt>`, with these checks and answer keys: `<each flow's check and answer key from the baseline receipt, including the spec it found>`. Report PROVED or BROKEN with evidence." No hint about the bug, the file or the layer. The answer keys are not hints: a real checker gets them too. Hand it the flows by name instead of the diff, and tell it not to read `git diff`, `git status`, `git log` or `.prove-it/audits/`: the planted bug sits in the working tree, so any of these would give it away. Tell it to keep any scratch files inside its run folder. If you can't start a sub-agent, run the skill's scripted checks only and mark the result "not blind" in the report.
 3. **Score** it, and note *what* caught it: the skill's scripts, or the checking agent going off-script. A verifier whose scripts catch little relies on every future agent being as diligent as this one, so report both numbers. Results: **caught** (BROKEN, and the evidence names the planted symptom), **caught by luck** (BROKEN for an unrelated reason), or **missed** (PROVED, or BROKEN with evidence that doesn't touch the planted bug). If you aren't sure the evidence names the symptom, have a second sub-agent read the evidence and decide.
 4. **Revert** by copying the backup over the file, confirm with `cmp`, run the skill's clean-up so no planted-bug instance stays alive.
 
