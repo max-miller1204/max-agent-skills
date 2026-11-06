@@ -48,7 +48,10 @@ sense, the card is wrong.
 - **Lists become one cloze per item**, not "name the five…".
 - **Calculation cards practice the method**: at most 3 per dataset, each with a different twist.
 - **Skip what nobody would get wrong.** No quota: a dense lecture might need 20 cards, a light one 6.
-- `Extra` carries the reason, or the tempting wrong answer and why it fails.
+- **Technical on the front and back.** Use the course's exact terms, names and notation; the lesson
+  teaches each of them, so the card can rely on them. Never trade precision for plain words here.
+- `Extra` (`Back Extra` on a cloze) carries the reason in one or two plain sentences, starting
+  `*Why:*` (no term the lesson didn't teach), or the tempting wrong answer and why it fails.
 - `Source` is short: `L_CondVars slide 9`, `coordination_queue.c lines 22-37`, `Test2 review guide 2.6`.
 
 ## Formatting rules (enforced by push)

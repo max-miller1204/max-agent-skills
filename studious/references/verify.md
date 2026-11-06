@@ -16,11 +16,31 @@ pages, code lines and so on, don't trust memory) and returns, per item:
   already in Anki, the daily run suspends its note (cards.md, Removing a card).
 
 Also check:
-- Content beyond the sources is inside `> [!supplementary]` and says where it comes from.
+- Content beyond the sources is inside `> [!supplementary]` and says where it comes from. (An
+  `[!analogy]` needs no source, but must not contradict them.)
 - Practice answers are right, and runnable exercises actually build and behave as described
   (run them).
 - Every card has a `Source`, one objective, and the right note type for its answer.
 - Code snippets match the course code they cite.
+- The lesson has the shape in lessons.md: plain TL;DR, builds-on line, a breakdown map whose links
+  all reach their sections, and one checkpoint per section, each with an answer (and a
+  "A good answer mentions:" checklist on an `Explain:` checkpoint).
+
+Feynman check, read as a newcomer would (each problem is a **fix**):
+- A term used before the lesson explains it, including in the TL;DR, an opener or a checkpoint.
+- A section whose first paragraph isn't plain words, or plain words that replace the precise
+  version instead of leading into it.
+- A skipped step: a "so" or "therefore" that doesn't follow from what came before.
+- A word standing in for a reason ("basically", "simply", "just", "obviously", "it turns out").
+- An `[!analogy]` with no "Where it breaks:" line, or one that contradicts the sources.
+- Padding or repetition that adds length and no understanding.
+
+When the lesson is a rewrite of an existing one, also compare it with the previous version (from the
+vault's git history: `git -C <vault> show HEAD:<lesson path>` before the rewrite was committed, or
+the commit the rewrite replaced). Every term, definition, fact, result, code example and equation the
+old lesson taught from the sources must still be in the new one, or replaced by something better
+from the sources. Restore anything lost by accident (a **fix**); a deliberate removal gets one line
+in the report saying why.
 
 When everything is pass or fixed, set `verified: true` in the lesson's frontmatter and write a short
 report to `studious/reports/<date>-verify-<lesson file name>.md`. Its first line after the title is

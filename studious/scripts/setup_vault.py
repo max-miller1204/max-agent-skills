@@ -3,8 +3,8 @@
 
     python3 setup_vault.py [--vault DIR]
 
-Creates the folders, a config.md template and the Dashboard.base lesson and goal views (only if missing), the Obsidian CSS snippet for card and
-supplementary callouts (enabled in appearance.json, other settings kept), .gitignore entries, and a
+Creates the folders, a config.md template and the Dashboard.base lesson and goal views (only if missing), the Obsidian CSS snippet for card,
+supplementary and analogy callouts (enabled in appearance.json, other settings kept), .gitignore entries, and a
 local git repository (no remote) used as an undo log. Prints what it did as JSON.
 """
 import argparse
@@ -18,6 +18,7 @@ FOLDERS = ['studious/reports', 'studious/manifests', 'goals', 'courses', 'timeta
            '.obsidian/snippets']
 SNIPPET = """.callout[data-callout="card"] { --callout-color: 59, 110, 165; --callout-icon: lucide-layers; }
 .callout[data-callout="supplementary"] { --callout-color: 130, 130, 130; --callout-icon: lucide-book-plus; }
+.callout[data-callout="analogy"] { --callout-color: 200, 140, 30; --callout-icon: lucide-lightbulb; }
 """
 IGNORES = ['.obsidian/workspace*.json', '.trash/', '.DS_Store']
 CONFIG = """---
