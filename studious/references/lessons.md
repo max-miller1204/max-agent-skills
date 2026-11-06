@@ -58,7 +58,7 @@ precise version, never instead of it.
      **`pthread_cond_wait`** does.");
    - the precise version: the principle and the mechanism in the course's exact terms, definitions,
      notation and code. Every term, definition, fact, equation and code example the sources teach
-     belongs here. It picks up where the opener stops instead of retelling it: give the course's
+     belongs in the section, here or already stated in the opener. It picks up where the opener stops instead of retelling it: give the course's
      name for what the opener described and go straight to what the opener left out (the exact
      definition, the steps, the conditions, the code);
    - at least one concrete example, traced step by step (a worked example, an interleaving, a
