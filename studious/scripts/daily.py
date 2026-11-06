@@ -12,9 +12,9 @@
    root (`CS3214` -> `Fall-2026::CS3214`), keeping its cards and review history.
 3. Snapshot and plan; push the cards of lessons marked done (or all in-scope cards in cram mode),
    and edits and retags of cards already in Anki; re-snapshot and re-plan if anything was pushed.
-4. Apply the plan to Anki: new cards/day per course, today-only overrides, reposition, cram decks;
-   suspend notes whose card block is gone from the vault (listed in the inbox) and unsuspend those
-   whose block is back.
+4. Apply the plan to Anki: new cards/day per course, today-only overrides, reposition, cram decks.
+   Then, as a step of its own, suspend notes whose card block is gone from the vault (listed in the
+   inbox) and unsuspend those whose block is back.
 5. Regenerate the timetables, write the calendar events.
 6. AnkiWeb sync again, quit Anki if this run started it, write the inbox, commit the vault (local git).
 7. Write a run log outside the vault, to ~/.local/state/studious/runs/<vault>/ (the last 60 are kept).
@@ -306,27 +306,33 @@ class Run:
             self.client.call('studiousSuspend', cardIds=plan['suspend'], suspended=True)
         if plan['unsuspend']:
             self.client.call('studiousSuspend', cardIds=plan['unsuspend'], suspended=False)
-        record = self.vault / 'studious/retired.json'
-        if plan['retired'] or record.exists():
-            record.write_text(json.dumps(plan['retired'], indent=1, sort_keys=True) + '\n')
+        anki.write_record(self.vault / 'studious/retired.json', plan['retired'])
         if plan['suspend'] or plan['unsuspend']:
             self.notes.append(f"Retired courses: {len(plan['suspend'])} cards suspended, "
                               f"{len(plan['unsuspend'])} unsuspended.")
-        self.apply_orphans(plan)
         return 'applied'
 
     def apply_orphans(self, plan):
         """Suspend the notes whose card block is gone (listed in the inbox), unsuspend those whose block
-        is back, and keep studious/orphaned.json to match."""
+        is back, and keep studious/orphaned.json to match. Its own step, so a failure elsewhere in the
+        apply doesn't leave removed cards in reviews."""
         orphans = plan.get('orphans') or {}
+        new, back = orphans.get('new') or [], orphans.get('unsuspend') or []
+        if self.dry_run:
+            if new or back:
+                self.notes.append(f"Dry run: would suspend {planner.plural(len(new), 'note')} whose card block is "
+                                  f"gone ({', '.join(o['guid'] for o in new) or 'none'}) and unsuspend "
+                                  f"{planner.plural(len(back), 'card')} of restored blocks.")
+            return 'dry run'
+        path, record = self.vault / 'studious/orphaned.json', plan.get('orphaned') or {}
+        # The record first, still holding the notes being restored: a call that fails then leaves cards
+        # recorded (the next run tries again), never suspended without a record.
+        anki.write_record(path, {**record, **(orphans.get('restored') or {})})
         if orphans.get('suspend'):
             self.client.call('studiousSuspend', cardIds=orphans['suspend'], suspended=True)
-        if orphans.get('unsuspend'):
-            self.client.call('studiousSuspend', cardIds=orphans['unsuspend'], suspended=False)
-        record = self.vault / 'studious/orphaned.json'
-        if plan.get('orphaned') or record.exists():
-            record.write_text(json.dumps(plan.get('orphaned') or {}, indent=1, sort_keys=True) + '\n')
-        new = orphans.get('new') or []
+        if back:
+            self.client.call('studiousSuspend', cardIds=back, suspended=False)
+        anki.write_record(path, record)
         fronts = {}
         if new:
             try:  # the start of each note's first field, so the inbox line is recognisable
@@ -340,9 +346,10 @@ class Run:
             front = fronts.get(o['guid'], '')
             front = f' "{front[:70]}{"..." if len(front) > 70 else ""}"' if front else ''
             self.orphans.append(f"{o['course']}: `{o['guid']}`{front} in {o['deck']}")
-        if new or orphans.get('unsuspend'):
+        if new or back:
             self.notes.append(f"Card blocks gone from the vault: {planner.plural(len(new), 'note')} suspended, "
-                              f"{len(orphans.get('unsuspend') or [])} cards of restored blocks unsuspended.")
+                              f"{planner.plural(len(back), 'card')} of restored blocks unsuspended.")
+        return dict(suspended=len(new), unsuspended=len(back))
 
     def optimize(self):
         """FSRS optimization once `fsrs_optimize_days` have passed since the last one (Anki counts)."""
@@ -458,6 +465,7 @@ def main(argv=None):
             if run.pushed and not args.dry_run:  # also when another lesson failed: Anki changed either way
                 state, plan = run.step('re-plan', run.make_plan, required=True)
         run.step('apply to anki', run.apply, plan)
+        run.step('orphans', run.apply_orphans, plan)  # on its own, so an apply failure doesn't hold it back
         run.step('optimize fsrs', run.optimize)
         run.step('timetables', run.timetables, state, plan)
         if not args.no_calendar:

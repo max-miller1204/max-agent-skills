@@ -338,17 +338,20 @@ def card_hash(text, card):
     return hashlib.sha256(block.encode()).hexdigest()[:16]
 
 
-def pushed_record(vault):
-    """studious/pushed.json: guid -> card_hash at its last push."""
-    path = Path(vault) / 'studious/pushed.json'
+def vault_record(vault, name):
+    """A JSON record studious keeps in the vault, `studious/<name>.json`, as (path, data); {} when missing.
+      pushed    guid -> card_hash at its last push
+      orphaned  guid -> {course, cardIds}: cards suspended because no card block has the guid (plan.py)
+      retired   course -> card ids suspended for a retired course"""
+    path = Path(vault) / f'studious/{name}.json'
     return path, (json.loads(path.read_text()) if path.exists() else {})
 
 
-def orphaned_record(vault):
-    """studious/orphaned.json: guid -> {course, cardIds} for the notes studious suspended because no
-    card block in the vault has their guid any more (see plan.py)."""
-    path = Path(vault) / 'studious/orphaned.json'
-    return path, (json.loads(path.read_text()) if path.exists() else {})
+def write_record(path, data):
+    """Write a vault record (not when it's empty and was never made)."""
+    if data or path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=1, sort_keys=True) + '\n')
 
 
 STUDIOUS_GUID = re.compile(r'[a-z0-9]+_[0-9a-f]{12}')  # what new_guid makes
@@ -359,18 +362,26 @@ def studious_owned(guid, pushed=()):
     return bool(STUDIOUS_GUID.fullmatch(guid or '')) or guid in pushed
 
 
-def vault_guids(vault):
-    """The guid of every card block anywhere in the vault, outside dot-folders (.git, .obsidian,
-    .trash): a card moved to another lesson or course, or sitting in a misplaced lesson, still counts."""
-    found = set()
+def vault_notes(vault):
+    """Every note where a card block may live: the whole vault but dot-folders (.git, .obsidian, .trash),
+    studious/ (reports and the inbox quote blocks) and practice code."""
+    vault = Path(vault)
     for dirpath, dirnames, filenames in os.walk(vault):
-        dirnames[:] = [d for d in dirnames if not d.startswith('.')]
-        for name in filenames:
-            if not name.endswith('.md'):
-                continue
-            text = Path(dirpath, name).read_text(encoding='utf-8', errors='replace')
-            if '[!card]' in text:
-                found |= {c['meta']['id'] for c in parse_cards(text) if c['meta'].get('id')}
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith('.') and d != 'practice'
+                             and not (d == 'studious' and Path(dirpath) == vault))
+        yield from (Path(dirpath, f) for f in sorted(filenames) if f.endswith('.md'))
+
+
+def vault_guids(vault, skip=()):
+    """The guid of every card block in the vault's notes (vault_notes), so a card moved to another
+    lesson or course, or sitting in a misplaced lesson, still counts. `skip`: paths already read."""
+    found = set()
+    for path in vault_notes(vault):
+        if path in skip:
+            continue
+        text = path.read_text(encoding='utf-8', errors='replace')
+        if '[!card]' in text:
+            found |= {c['meta']['id'] for c in parse_cards(text) if c['meta'].get('id')}
     return found
 
 
@@ -524,8 +535,8 @@ def lesson_files(paths):
 def push(anki, vault, paths, ungated=False, dry_run=False):
     connectors = connectors_dir()
     fields_by_type = note_fields(connectors)
-    record_path, record = pushed_record(vault)
-    orphans_path, orphans = orphaned_record(vault)
+    record_path, record = vault_record(vault, 'pushed')
+    orphans_path, orphans = vault_record(vault, 'orphaned')
     orphans_before = dict(orphans)
     config = vault_config(vault)
     report = []
@@ -607,7 +618,8 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
             record[r['guid']] = hashes[r['guid']]
         # A note studious suspended when its block went missing is back in a verified lesson: unsuspend
         # the cards it suspended (only those; any suspended by hand stay so).
-        back = [r['guid'] for r in results if r['guid'] in orphans]
+        back = [r['guid'] for r in results if r['guid'] in orphans  # not while its cards' course is retired
+                and not course_entry(config, orphans[r['guid']].get('course', '')).get('retired')]
         ids = sorted({i for g in back for i in orphans[g].get('cardIds') or []})
         if ids:
             try:
@@ -620,15 +632,14 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
         if back:
             entry['restored'] = len(back)
     if not dry_run and Path(vault).is_dir():
-        record_path.parent.mkdir(parents=True, exist_ok=True)
-        record_path.write_text(json.dumps(record, indent=1, sort_keys=True) + '\n')
+        write_record(record_path, record)
         if orphans != orphans_before:
-            orphans_path.write_text(json.dumps(orphans, indent=1, sort_keys=True) + '\n')
+            write_record(orphans_path, orphans)
     return report
 
 
 def find_card(vault, guid):
-    for path in lesson_files([Path(vault)]):
+    for path in vault_notes(vault):  # where orphan detection looks, so the two agree
         text = path.read_text(encoding='utf-8')
         if guid not in text:
             continue
@@ -732,7 +743,7 @@ def main(argv=None):
             out = anki.call('studiousObserve', root=resolve_root(config, args.root), sinceMs=since)
         elif args.cmd == 'flagged':
             cards = anki.call('studiousObserve', root=resolve_root(config, args.root), sinceMs=0)['cards']
-            pushed = pushed_record(args.vault)[1]
+            pushed = vault_record(args.vault, 'pushed')[1]
             out = []
             for c in cards:
                 if not c['flag']:

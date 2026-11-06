@@ -514,8 +514,9 @@ class FakeCollection:
             return dict(root=root, today=1000, dayCutoff=0, cards=cards, revlog=[], counts=dict(new=0, learning=0, review=0),
                         preset=dict(name='studious', newPerDay=5, reviewsPerDay=9999))
         if action == 'studiousNotes':
-            return [dict(guid=g, fields=self.notes[g]['fields'], tags=self.notes[g]['tags']) for g in params['guids']
-                    if g in self.notes]
+            return [dict(guid=g, fields=self.notes[g]['fields'], tags=self.notes[g]['tags'],
+                         cards=[dict(cardId=c['id'], deck=c['deck'], queue=-1 if c['suspended'] else 0)
+                                for c in self.notes[g]['cards']]) for g in params['guids'] if g in self.notes]
         if action == 'studiousUpsertNotes':
             out = []
             for n in params['notes']:
@@ -620,8 +621,94 @@ def test_push_unsuspends_a_restored_card(tmp_path):
     assert json.loads((tmp_path / 'studious/orphaned.json').read_text()) == {}
 
 
-def test_vault_guids_finds_blocks_anywhere_but_dot_folders(tmp_path):
-    (tmp_path / 'misplaced.md').write_text(CARD.format(title='x', guid='cs3214_aaaaaaaaaaaa', n=1))
-    (tmp_path / '.trash').mkdir()
-    (tmp_path / '.trash/old.md').write_text(CARD.format(title='y', guid='cs3214_bbbbbbbbbbbb', n=1))
-    assert anki.vault_guids(tmp_path) == {'cs3214_aaaaaaaaaaaa'}
+def test_vault_guids_finds_blocks_anywhere_but_dot_folders_reports_and_practice(tmp_path):
+    def note(rel, guid):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(CARD.format(title='x', guid=guid, n=1))
+    note('misplaced.md', 'cs3214_aaaaaaaaaaaa')
+    note('.trash/old.md', 'cs3214_bbbbbbbbbbbb')
+    note('studious/reports/2026-11-06-verify-07.md', 'cs3214_cccccccccccc')  # a report quoting a dropped card
+    note('courses/CS3214/practice/07-x/notes.md', 'cs3214_dddddddddddd')
+    note('courses/CS3214/lessons/studious/odd.md', 'cs3214_eeeeeeeeeeee')  # only the top studious/ is skipped
+    assert anki.vault_guids(tmp_path) == {'cs3214_aaaaaaaaaaaa', 'cs3214_eeeeeeeeeeee'}
+    assert anki.vault_guids(tmp_path, skip={tmp_path / 'misplaced.md'}) == {'cs3214_eeeeeeeeeeee'}
+    assert anki.find_card(tmp_path, 'cs3214_bbbbbbbbbbbb') is None  # flagged agrees: a trashed block is gone
+    assert anki.find_card(tmp_path, 'cs3214_aaaaaaaaaaaa')['path'].endswith('misplaced.md')
+
+
+def orphan_run(tmp_path, client, dry_run=False):
+    dspec = importlib.util.spec_from_file_location('daily', SCRIPTS / 'daily.py')
+    daily = importlib.util.module_from_spec(dspec)
+    dspec.loader.exec_module(daily)
+    (tmp_path / 'studious').mkdir(exist_ok=True)
+    (tmp_path / 'studious/config.md').write_text('---\nanki_profile: Max\n---\n')
+    run = daily.Run(str(tmp_path), dry_run)
+    run.client = client
+    client.Refused = daily.anki.Refused
+    return daily, run
+
+
+def test_a_failed_unsuspend_keeps_the_restored_note_recorded(tmp_path):
+    fake = FakeCollection()
+    fake.notes = {'cs3214_aaaaaaaaaaaa': dict(fields={}, tags=[], cards=[dict(id=1, deck='CS3214::L01', suspended=True)]),
+                  'cs3214_bbbbbbbbbbbb': dict(fields={'Front': 'Gone'}, tags=[], cards=[dict(id=2, deck='CS3214::L01', suspended=False)])}
+
+    class Flaky(FakeCollection):
+        def call(self, action, **params):
+            if action == 'studiousSuspend' and params['suspended'] is False:
+                raise self.Refused('collection is busy')
+            return fake.call(action, **params)
+
+    daily, run = orphan_run(tmp_path, Flaky())
+    restored = {'cs3214_aaaaaaaaaaaa': dict(course='CS3214', cardIds=[1])}
+    gone = {'cs3214_bbbbbbbbbbbb': dict(course='CS3214', cardIds=[2])}
+    plan = dict(orphans=dict(suspend=[2], unsuspend=[1], restored=restored,
+                             new=[dict(guid='cs3214_bbbbbbbbbbbb', course='CS3214', deck='CS3214::L01', cardIds=[2])]),
+                orphaned=gone)
+    assert run.step('orphans', run.apply_orphans, plan) is None and run.errors
+    assert fake.suspended('cs3214_bbbbbbbbbbbb') == [True]  # suspended, and recorded before the call
+    assert json.loads((tmp_path / 'studious/orphaned.json').read_text()) == {**gone, **restored}  # retried next run
+
+
+def test_an_apply_failure_does_not_hold_back_the_orphans(tmp_path):
+    fake = FakeCollection()
+    calls = []
+
+    class Broken(FakeCollection):
+        def call(self, action, **params):
+            calls.append(action)
+            if action == 'studiousApplySettings':
+                raise self.Refused('settings refused')
+            return fake.call(action, **params)
+
+    daily, run = orphan_run(tmp_path, Broken())
+    plan = dict(courses={}, total_new_per_day=0, cram=[], cram_delete=[], suspend=[], unsuspend=[], retired={},
+                orphans=dict(suspend=[7], unsuspend=[], restored={}, new=[]), orphaned={'g': dict(course='X', cardIds=[7])})
+    run.step('apply to anki', run.apply, plan)  # two steps, as main runs them
+    run.step('orphans', run.apply_orphans, plan)
+    assert calls == ['studiousApplySettings', 'studiousSuspend'] and len(run.errors) == 1
+
+
+def test_a_dry_run_says_what_it_would_suspend(tmp_path):
+    fake = FakeCollection()
+    daily, run = orphan_run(tmp_path, fake, dry_run=True)
+    plan = dict(orphans=dict(suspend=[2], unsuspend=[], restored={},
+                             new=[dict(guid='cs3214_bbbbbbbbbbbb', course='CS3214', deck='CS3214::L01', cardIds=[2])]),
+                orphaned={'cs3214_bbbbbbbbbbbb': dict(course='CS3214', cardIds=[2])})
+    assert run.apply_orphans(plan) == 'dry run' and fake.calls == []
+    assert run.notes == ['Dry run: would suspend 1 note whose card block is gone (cs3214_bbbbbbbbbbbb) and '
+                         'unsuspend 0 cards of restored blocks.']
+    assert not (tmp_path / 'studious/orphaned.json').exists()
+
+
+def test_push_leaves_a_restored_card_of_a_retired_course_suspended(tmp_path):
+    path = write_lesson(tmp_path, LESSON.replace('done: false', 'done: true'))
+    (tmp_path / 'studious').mkdir(exist_ok=True)
+    (tmp_path / 'studious/config.md').write_text('---\ncourses:\n  CS2505:\n    retired: true\n---\n')
+    fake = FakeCollection()
+    anki.push(fake, str(tmp_path), [str(path)])
+    gone = 'cs3214_aaaaaaaaaaaa'
+    fake.call('studiousSuspend', cardIds=[2], suspended=True)
+    (tmp_path / 'studious/orphaned.json').write_text(json.dumps({gone: dict(course='CS2505', cardIds=[2])}))
+    report = anki.push(fake, str(tmp_path), [str(path)])
+    assert 'restored' not in report[0] and fake.suspended(gone) == [True]

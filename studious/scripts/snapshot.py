@@ -115,6 +115,20 @@ def forecast(client, roots):
                 load={code: fc['load'][root] for code, root in roots.items() if root in fc['load']})
 
 
+def orphan_cards(client, record):
+    """The cards of each note studious suspended as an orphan, as Anki has them now, wherever they sit:
+    {guid: [{cardId, deck, suspended}]}, without the guids whose note was deleted. None when Anki
+    couldn't say, so the planner keeps the record as it is."""
+    if not record:
+        return {}
+    try:
+        notes = client.call('studiousNotes', guids=sorted(record))
+    except anki.Refused:
+        return None
+    return {n['guid']: [dict(cardId=c['cardId'], deck=c['deck'], suspended=c['queue'] == -1) for c in n['cards']]
+            for n in notes}
+
+
 def spell_courses(config, items):
     """The planner matches course codes exactly, Anki ignores case: spell them as the config does."""
     for item in items:
@@ -160,13 +174,11 @@ def main(argv=None):
     vault = Path(args.vault)
     mine = {k: v for k, v in anki.vault_config(vault).items() if v is not None}
     config = {**DEFAULTS, 'vault_name': vault.name, **mine}
-    retired = vault / 'studious/retired.json'  # cards studious suspended for retired courses
     today = datetime.datetime.now(ZoneInfo(config.get('timezone') or 'America/New_York')).date()
     state = dict(today=args.today or today.isoformat(), config=config, config_set=sorted(mine),
                  goals=goals(vault), lessons=[], courses={}, errors=[], warnings=[],
-                 retired=json.loads(retired.read_text()) if retired.exists() else {},
-                 pushed=anki.pushed_record(vault)[1], orphaned=anki.orphaned_record(vault)[1])
-    state['vault_guids'] = sorted(anki.vault_guids(vault))  # every card block, for orphan detection
+                 retired=anki.vault_record(vault, 'retired')[1], pushed=anki.vault_record(vault, 'pushed')[1],
+                 orphaned=anki.vault_record(vault, 'orphaned')[1])
     try:
         state['lessons'] = lessons(vault, config)
         spell_courses(config, state['goals'] + state['lessons'])
@@ -178,7 +190,10 @@ def main(argv=None):
     except anki.Refused as exc:  # a bad `group` in the config
         state['errors'].append(str(exc))
         roots = {}
-    client = anki.Anki(int(config.get('anki_port') or 8765), os.environ.get('STUDIOUS_ANKI_PROFILE') or config.get('anki_profile'))
+    # every card block in the vault, for orphan detection: the lessons' guids, then the other notes
+    state['vault_guids'] = sorted({c['guid'] for l in state['lessons'] for c in l['cards'] if c['guid']}
+                                  | anki.vault_guids(vault, skip={vault / l['path'] for l in state['lessons']}))
+    client =anki.Anki(int(config.get('anki_port') or 8765), os.environ.get('STUDIOUS_ANKI_PROFILE') or config.get('anki_profile'))
     since = int((time.time() - args.since_days * 86400) * 1000)
     codes = sorted(roots)
     for code in codes:
@@ -186,8 +201,9 @@ def main(argv=None):
             seen = client.call('studiousObserve', root=roots[code], sinceMs=since)
             state['courses'][code] = dict(
                 root=roots[code], today=seen['today'], counts=seen['counts'], preset=seen['preset'], revlog=seen['revlog'],
-                cards=[{k: c[k] for k in ('cardId', 'noteId', 'guid', 'deck', 'type', 'queue', 'due', 'reps',
-                                          'lapses', 'flag', 'suspended', 'tags', 'retrievability')} for c in seen['cards']])
+                cards=[{**{k: c[k] for k in ('cardId', 'noteId', 'guid', 'deck', 'type', 'queue', 'due', 'reps',
+                                             'lapses', 'flag', 'suspended', 'tags', 'retrievability')},
+                        'owned': anki.studious_owned(c['guid'], state['pushed'])} for c in seen['cards']])
         except anki.Refused as exc:
             if 'does not exist' in str(exc):
                 state['courses'][code] = dict(root=roots[code], today=None, counts=dict(new=0, learning=0, review=0),
@@ -195,7 +211,8 @@ def main(argv=None):
             else:
                 state['errors'].append(f'{code}: {exc}')
     state['forecast'] = forecast(client, {c: roots[c] for c in codes if state['courses'].get(c, {}).get('today') is not None})
-    text = json.dumps(state, indent=1, ensure_ascii=False)
+    state['orphaned_cards'] = orphan_cards(client, state['orphaned'])
+    text =json.dumps(state, indent=1, ensure_ascii=False)
     if args.out:
         Path(args.out).write_text(text, encoding='utf-8')
     else:

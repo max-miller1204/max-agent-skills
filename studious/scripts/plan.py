@@ -53,7 +53,6 @@ import argparse
 import datetime
 import json
 import math
-import re
 import sys
 
 WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -141,43 +140,54 @@ class Load:
             self.load[d] += x * self.w[d - t]
 
 
-GUID_SHAPE = re.compile(r'[a-z0-9]+_[0-9a-f]{12}')  # the guids anki.py's push makes
-
-
 def orphans(state, retired):
     """Notes whose card block is gone from the vault, and notes whose block came back.
 
-    An orphan is a card of a non-retired course's root deck that studious made (a guid of its shape,
-    or one in `pushed`) and whose guid is in no card block anywhere in the vault (state
-    `vault_guids`), so a card moved to another lesson or course isn't one. Its unsuspended cards are
-    suspended and recorded (state `orphaned`); cards already suspended are left alone. A course with
-    orphans but no lesson at all is held with a warning (a folder missing from a sync). A recorded
-    note whose guid is back in a verified lesson gets the recorded cards unsuspended; one deleted
-    from Anki drops out of the record."""
+    An orphan is a card of a non-retired course's root deck that studious made (snapshot marks it
+    `owned`) and whose guid is in no card block of the vault's notes (state `vault_guids`), so a card
+    moved to another lesson or course isn't one. Its unsuspended cards are suspended and recorded
+    (state `orphaned`); cards already suspended are left alone. A course with orphans but no lesson
+    at all is held with a warning (a folder missing from a sync). A recorded note whose guid is back
+    in a verified lesson gets the recorded cards unsuspended, wherever they sit now (state
+    `orphaned_cards`), unless they're in a retired course's deck; one deleted from Anki drops out of
+    the record. `restored` holds the record entries being unsuspended, so the daily run can keep
+    them recorded until the unsuspend went through."""
     courses = state.get('courses') or {}
     record = {guid: dict(entry) for guid, entry in (state.get('orphaned') or {}).items()}
-    out = dict(suspend=[], unsuspend=[], new=[], warnings=[], record=record)
+    out = dict(suspend=[], unsuspend=[], new=[], warnings=[], record=record, restored={})
     if state.get('vault_guids') is None:  # a state from before orphan detection
         return out
-    in_vault, pushed = set(state['vault_guids']), state.get('pushed') or {}
+    in_vault = set(state['vault_guids'])
     lessons = [l for l in state.get('lessons') or [] if l['course'] not in retired]
     verified = {c['guid'] for l in lessons if l['verified'] for c in l['cards'] if c.get('guid')}
     by_card = {c['cardId']: c for course in courses.values() for c in course.get('cards') or []}
-    in_anki = {c['guid'] for c in by_card.values()}
-    observed = {code for code, course in courses.items() if course.get('today') is not None}
+    now = state.get('orphaned_cards')  # None: Anki couldn't say, so nothing is dropped
+    off_limits = [((courses.get(code) or {}).get('root') or code).lower() for code in retired]
+
+    def in_retired(deck):
+        deck = (deck or '').lower()
+        return any(deck == r or deck.startswith(r + '::') for r in off_limits)
+
     for guid in sorted(record):
         entry = record[guid]
-        if guid in verified:
-            out['unsuspend'] += [i for i in entry.get('cardIds') or [] if (by_card.get(i) or {}).get('suspended')]
-            del record[guid]
-        elif guid not in in_anki and entry.get('course') in observed:
+        if now is not None and guid not in now:
             del record[guid]  # the note was deleted in Anki
+            continue
+        if guid not in verified:
+            continue
+        cards = {c['cardId']: c for c in now[guid]} if now is not None else by_card
+        mine = [i for i in entry.get('cardIds') or [] if i in cards]
+        if any(in_retired(cards[i].get('deck')) for i in mine):
+            continue  # its course is retired: the retired rule has it until the flag comes off
+        out['unsuspend'] += [i for i in mine if cards[i]['suspended']]
+        out['restored'][guid] = entry
+        del record[guid]
     with_lessons = {l['course'] for l in lessons}
     for code in sorted(set(courses) - retired):
         notes = {}
         for c in courses[code].get('cards') or []:
             guid = c.get('guid') or ''
-            if guid not in in_vault and (GUID_SHAPE.fullmatch(guid) or guid in pushed):
+            if guid not in in_vault and c.get('owned'):
                 notes.setdefault(guid, []).append(c)
         if not notes:
             continue
@@ -615,6 +625,7 @@ def plan(state):
     # ---- retired courses: suspend their cards; unsuspend what studious suspended once retired is off ----
     record = {code: list(ids) for code, ids in (state.get('retired') or {}).items()}
     suspend, unsuspend = [], []
+    held = {i for e in orphaned['record'].values() for i in e.get('cardIds') or []}  # still orphaned: stay suspended
     for code in sorted(set(record) | retired):
         cards = (courses.get(code) or {}).get('cards') or []
         if code in retired:
@@ -623,7 +634,6 @@ def plan(state):
             record[code] = sorted(set(record.get(code) or []) | set(ids))
         else:
             mine = set(record.pop(code))
-            held = {i for e in orphaned['record'].values() for i in e.get('cardIds') or []}  # still orphaned
             unsuspend += [c['cardId'] for c in cards if c['cardId'] in mine and c['suspended'] and c['cardId'] not in held]
 
     for code in sorted({g['course'] for g in state.get('goals') or []} - retired):
@@ -638,7 +648,7 @@ def plan(state):
                 goals=goals_out, courses=course_out,
                 push=push, cram=cram, cram_delete=sorted(set(cram_delete)), days=days,
                 suspend=suspend, unsuspend=unsuspend, retired=record, inbox=inbox, warnings=warnings,
-                orphans=dict(suspend=orphaned['suspend'], unsuspend=orphaned['unsuspend'], new=orphaned['new']),
+                orphans={k: orphaned[k] for k in ('suspend', 'unsuspend', 'new', 'restored')},
                 orphaned=orphaned['record'])
 
 

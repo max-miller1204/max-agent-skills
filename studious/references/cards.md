@@ -80,11 +80,13 @@ is its topic (`L_CondVars`); studious puts it under the course deck (`CS3214::L_
 Removing a card block from a lesson (a verify drop, a split or merge, a rewrite after a source
 changed) leaves its note in Anki, so the daily run suspends it: a note studious made (a
 `<course>_<12 hex>` guid, or one in `pushed.json`) in a course's deck whose guid is in no card block
-anywhere in the vault (dot-folders like `.trash` aside). Its review history stays; the inbox lists it
+anywhere in the vault, apart from dot-folders (`.trash`), `studious/` (a report quoting a dropped
+card doesn't keep it) and practice code. Its review history stays; the inbox lists it
 once, under "Suspended (card block gone)", and `studious/orphaned.json` records the cards it
 suspended. A card moved to another lesson, or another course, keeps its id and is not suspended:
 move a block with its `%% id %%` line, never retype it. To bring a note back, put its block (with
 the same id) in a verified lesson: the next push or daily run unsuspends exactly the recorded cards,
-leaving any suspended by hand. Deleting the note in Anki is the user's call, by hand, for a card
+wherever they sit now, leaving any suspended by hand (and any in a retired course's deck).
+`daily.py --dry-run` lists what it would suspend. Deleting the note in Anki is the user's call, by hand, for a card
 gone for good. A course whose lessons are all missing is held with a warning instead (a folder lost
 in a sync); retire it to suspend its cards on purpose.
