@@ -35,6 +35,7 @@ Commands (all print JSON):
   delete-notes [GUID...] [--file F] [--dry-run]
                               delete studious notes for good (only with the user's OK on the dry-run
                               list); refuses guids still in a card block or not made by studious
+                              (patch v10)
   cram NAME --search QUERY [--limit N]   |   cram-delete NAME
   sync                        normal AnkiWeb sync; refuses when a full sync is needed
   call ACTION [JSON_PARAMS]   any AnkiConnect action (profile added for studious* actions)
@@ -671,7 +672,13 @@ def delete_notes(anki, vault, guids, dry_run=False):
         out['guids'] = sorted(found)
         return out
     if notes:
-        anki.call('deleteNotes', notes=[n['noteId'] for n in notes])
+        try:  # looks up and deletes by guid in one profile-checked call (patch v10)
+            anki.call('studiousDeleteNotes', guids=sorted(found))
+        except Refused as exc:
+            if 'unsupported action' in str(exc).lower():
+                raise Refused('nothing deleted: delete-notes needs the studious patch v10. Run '
+                              '`python3 ~/.local/share/studious/connectors/anki/apply.py`, restart Anki, retry')
+            raise
     gone = set(guids)  # missing ones too: Anki doesn't have them either way
     write_record(pushed_path, {g: h for g, h in pushed.items() if g not in gone})
     write_record(orphans_path, {g: e for g, e in orphans.items() if g not in gone})

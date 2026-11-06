@@ -724,9 +724,10 @@ class DeletingAnki:
     def call(self, action, **params):
         if action == 'studiousNotes':
             return [dict(guid=g, noteId=self.notes[g], cards=[dict(reps=2)]) for g in params['guids'] if g in self.notes]
-        assert action == 'deleteNotes'
-        self.deleted += params['notes']
-        self.notes = {g: i for g, i in self.notes.items() if i not in params['notes']}
+        assert action == 'studiousDeleteNotes'
+        self.deleted += [self.notes[g] for g in params['guids'] if g in self.notes]
+        self.notes = {g: i for g, i in self.notes.items() if g not in params['guids']}
+        return dict(deleted=len(params['guids']), cards=0, missing=[])
 
 
 def test_delete_notes_deletes_and_cleans_the_records(tmp_path):
