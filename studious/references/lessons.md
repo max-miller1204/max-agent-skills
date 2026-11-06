@@ -65,7 +65,9 @@ precise version, never instead of it.
      derivation, a run of the code);
    - a `> [!analogy]` callout, only when a good analogy exists (never forced). It needs no source,
      since it's a teaching aid and not a course fact, and it ends by saying where the picture stops
-     being true:
+     being true. If the opener already uses a picture, don't retell it here: either give a
+     different one, or keep the callout to one line naming the picture plus its limit. Its words
+     must not clash with the technical terms (a paper pile's "top" is not a deque's top):
      ```
      > [!analogy] A waiting room with a buzzer
      > ...

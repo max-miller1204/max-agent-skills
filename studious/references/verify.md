@@ -22,6 +22,11 @@ Also check:
   (run them).
 - Every card has a `Source`, one objective, and the right note type for its answer.
 - Code snippets match the course code they cite.
+- Coverage: go through every slide or page of each source, including figure-only ones (look at the
+  page images, not only extracted text), and add what the lesson is missing. A rewrite inherits the
+  old lesson's gaps unless you check the source itself.
+- Tool versions and outputs quoted in supplementary notes (compiler, library versions) still hold on
+  this machine; rerun and update them.
 - The lesson has the shape in lessons.md: plain TL;DR, builds-on line, a breakdown map whose links
   all reach their sections, and one checkpoint per section, each with an answer (and a
   "A good answer mentions:" checklist on an `Explain:` checkpoint).
