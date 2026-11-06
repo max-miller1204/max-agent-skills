@@ -7,14 +7,18 @@ what teaches better.
 
 ## File
 
-`courses/<COURSE>/lessons/<NN>-<slug>.md`, numbered in course order (`07-condition-variables.md`).
+`courses/<COURSE>/lessons/<NN>-<slug>.md`, or `courses/<group>/<COURSE>/lessons/…` when the course has a
+`group` in the config (`courses/Fall-2026/CS3214/lessons/…`; `anki.course_dir` gives the folder),
+numbered in course order (`07-condition-variables.md`).
 A topic too big for one sitting splits into parts (`07a-…`, `07b-…`).
 
 ```yaml
 ---
 title: Condition Variables and Monitors
 course: CS3214                 # course or track code, as used in tags and decks
-deck: CS3214::L_CondVars       # course root :: topic subdeck (topic = lecture name in the user's style)
+deck: L_CondVars               # topic subdeck (the lecture name in the user's style); studious puts it
+                               # under the course deck: CS3214::L_CondVars, or Fall-2026::CS3214::L_CondVars
+                               # when the course has a group. Older lessons say CS3214::L_CondVars: same deck.
 goals: [Test2]                 # goal ids whose scope includes this lesson; drives exam/cheatsheet tags
 sources:
   - cs3214/notes/conditionvariables.pdf
@@ -46,7 +50,7 @@ Source paths are relative to the user's home folder, the same on every machine.
    predict an interleaving or output, find the bug, write or fix code, explain a design choice,
    compute something. Each answer is in a folded `> [!success]- Answer` callout with the reasoning.
    For programming topics, include at least one runnable exercise: put the files in
-   `courses/<COURSE>/practice/<NN>-<slug>/` with the exact build and run command, and make the
+   the course folder's `practice/<NN>-<slug>/` with the exact build and run command, and make the
    program check itself (asserts, a test harness) so the user knows when it works.
 4. `## Cards`: the card blocks (see cards.md), each a folded `[!card]-` callout.
 5. `## Sources`: every file used, with the pages, slides, lines or timestamps.

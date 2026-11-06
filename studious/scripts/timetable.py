@@ -121,7 +121,8 @@ def render(state, goal, planned=None):
         verdict += (f"\ncram: {'true' if planned.get('cram') else 'false'}"
                    f"\nlessons_left: {len(left)}\ncards_left: {planned.get('unseen') or 0}"
                    f"\nnew_cards_today: {planned.get('required_new_per_day') or 0}")
-    return (f"---\ntype: timetable\ngoal: {goal['id']}\ncourse: {goal['course']}{goal_link}{verdict}\n"
+    group = f"\ngroup: {json.dumps(goal['group'])}" if goal.get('group') else ''
+    return (f"---\ntype: timetable\ngoal: {goal['id']}\ncourse: {goal['course']}{group}{goal_link}{verdict}\n"
             f"lessons:{links or ' []'}\nupdated: {state['today']}\n---\n"
             f"# {goal['title']}{when}\n\n"
             "> [!info]- How to read this\n"

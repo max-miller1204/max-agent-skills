@@ -90,8 +90,9 @@ Then set `obsidian_sync_service: studious-obsidian-sync` in the config, and the 
 Ask these together, with the defaults shown, then write the answers into `studious/config.md`'s
 frontmatter. Never invent values the user didn't choose; leave a key out to get its default.
 
-1. **Courses and tracks**: a code for each (as used in decks and tags: `CS3214`, `Rust`) and its
-   source folders, relative to the home folder.
+1. **Courses and tracks**: a code for each (as used in decks and tags: `CS3214`, `Rust`), its
+   source folders, relative to the home folder, and the group it belongs to, if any: a semester
+   (`Fall-2026`), `Work`, a project, nested with `/` (`Work/Infra`).
 2. **Calendar**: `uv run scripts/calendar_events.py calendars`, then pick the Studious calendar
    for `calendar_id`, and the calendars that hold exams and deadlines for `deadline_calendars`.
 3. **Daily budget**: Anki cards per day (new cards plus reviews), most lessons per day,
@@ -110,7 +111,7 @@ Config keys and defaults:
 | `vault_name` | the vault folder's name | The vault's name in Obsidian, for `obsidian://` links. |
 | `calendar_id` | none | The calendar the daily events go to. Unset: no calendar writes. |
 | `deadline_calendars` | all | Calendar names or ids scanned for exams and deadlines. |
-| `courses` | `{}` | `CODE: {folders: [path, ...]}`; add `done: true` when the course is over (no new cards, done preset), or `retired: true` to suspend all its cards and leave it out of planning (remove it to unsuspend). |
+| `courses` | `{}` | `CODE: {folders: [path, ...], group: Fall-2026}`; `group` (optional: a semester, `Work`, a project, nested as `Work/Infra`) puts the course under a parent deck (`Fall-2026::CODE`, `Work::Infra::CODE`) and folders (`courses/Fall-2026/CODE`, `goals/Fall-2026/`), so studying the group's deck interleaves all its courses. Add `done: true` when the course is over (no new cards, done preset), or `retired: true` to suspend all its cards and leave it out of planning (remove it to unsuspend). |
 | `cards_per_day` | 150 | Anki cards a day for all courses together: new cards plus reviews (the number on the calendar event). The reviews each new card brings come from Anki's FSRS simulator, so new cards are placed where they keep every day under this; a deadline that can't fit goes over it, with a warning naming the busiest day. |
 | `max_lessons_per_day` | 2 | Across all goals. |
 | `lesson_buffer_days` | 3 | Lessons finish this many days before a deadline (cram mode uses the day before). |
@@ -194,7 +195,7 @@ uv run scripts/calendar_events.py deadlines
 ```
 
 lists exam-like events in `deadline_calendars` for the next 120 days that have no goal yet. For each
-one the user wants: create `goals/<COURSE>-<id>.md` (SKILL.md, Goals) with `calendar_event_id` set to
+one the user wants: create the goal note in the course's goal folder (`goals/[<group>/]<COURSE>-<id>.md`, SKILL.md, Goals) with `calendar_event_id` set to
 the event's id, so it isn't offered again. Tentative events can wait. Then ingest the nearest goal's
 material first; everything else fills in over later runs.
 
@@ -228,6 +229,23 @@ When the user is happy with the lessons and cards from the `testing` profile:
 5. `uv run scripts/daily.py`, then check the event and the deck options in Anki.
 
 The test profile can stay as it is; nothing writes to it once the config points elsewhere.
+
+## Moving a course into a group
+
+A course that already has lessons and cards moves without losing review history, from no group
+into one or from one group to another:
+
+1. Set (or change) `group:` on the course in `studious/config.md`.
+2. Move its folder to `courses/<group>/CS3214/` and its goal notes to `goals/<group>/`. Lessons need
+   no edit: their `deck` is the topic, and the group comes from the config.
+3. Rewrite links to the old folders: `[[courses/…/CS3214/…` in `studious/reports/`, `"lesson"` paths
+   in `studious/manifests/CS3214.json`, and any links you made yourself to the goal notes.
+4. Run `uv run scripts/daily.py`. Its "move decks" step renames the course's deck (`CS3214` or
+   `<old group>::CS3214`) to the new root, with its lesson and cram decks, keeping every card's review
+   history (patch v9 or later; with an older patch the run stops there and says so). It also rewrites
+   the timetables, and the inbox lists any lesson or goal note still outside the new folders.
+
+To rename a deck by hand instead: `uv run scripts/anki.py rename-deck CS3214 Fall-2026::CS3214`.
 
 ## New machine (for example the Mac)
 

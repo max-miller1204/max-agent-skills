@@ -8,7 +8,8 @@
     uv run daily.py [--vault DIR] [--dry-run] [--no-calendar]
 
 1. Preflight: Obsidian sync service (if configured), Anki running (launched if needed).
-2. AnkiWeb sync (never a full sync).
+2. AnkiWeb sync (never a full sync). A course whose `group` changed has its deck renamed to the new
+   root (`CS3214` -> `Fall-2026::CS3214`), keeping its cards and review history.
 3. Snapshot and plan; push the cards of lessons marked done (or all in-scope cards in cram mode),
    and edits and retags of cards already in Anki; re-snapshot and re-plan if anything was pushed.
 4. Apply the plan to Anki: new cards/day per course, today-only overrides, reposition, cram decks.
@@ -197,6 +198,36 @@ class Run:
             raise
 
     # ---- plan and apply ----
+    def move_decks(self):
+        """A course whose `group` changed keeps its cards: when its root deck (`Fall-2026::CS3214`)
+        doesn't exist but one deck elsewhere ends in its code (`CS3214`, `Spring-2026::CS3214`), that
+        deck is renamed to the new root before planning, so no card lands in a second deck tree."""
+        courses = self.config.get('courses') or {}
+        if not courses:
+            return []
+        names = self.client.call('deckNames')
+        have = {n.lower() for n in names}
+        roots = {code: anki.course_root(self.config, code) for code in courses}
+        moved = []
+        for code, root in roots.items():
+            if root.lower() in have:
+                continue
+            others = [r.lower() + '::' for c, r in roots.items() if c != code]
+            old = [n for n in names if n.split('::')[-1].lower() == str(code).lower()
+                   and not any(n.lower().startswith(o) for o in others)]
+            if len(old) > 1:
+                self.note(f"{code}: its deck {root} doesn't exist and {len(old)} decks could be it "
+                          f"({', '.join(old)}): rename the right one with `anki.py rename-deck`.", attention=True)
+                continue
+            if not old:
+                continue  # no cards yet: the first push makes the deck
+            if not self.dry_run:
+                self.client.call('studiousRenameDeck', old=old[0], new=root)
+            self.note(f"{code}: Anki deck {old[0]} {'would move' if self.dry_run else 'moved'} to {root}, "
+                      "following its group in the config.")
+            moved.append(dict(course=code, old=old[0], new=root))
+        return moved
+
     def make_plan(self):
         cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'studious'
         state_path = cache / f'state-{self.vault.name}.json'  # scratch, kept out of the synced vault
@@ -241,7 +272,7 @@ class Run:
         names = [p['name'] for p in payload['presets']]
         for code, c in plan['courses'].items():
             try:
-                self.client.call('studiousSetLimits', root=code, newPerDay=c['new_per_day'], newToday=c['new_today'],
+                self.client.call('studiousSetLimits', root=anki.course_root(self.config, code), newPerDay=c['new_per_day'], newToday=c['new_today'],
                                  preset=names[1] if c.get('done') else names[0])
             except anki.Refused as exc:
                 if 'does not exist' in str(exc):
@@ -252,10 +283,15 @@ class Run:
         for deck in plan['cram']:
             try:
                 self.client.call('studiousCram', name=deck['name'], search=deck['search'], limit=deck['limit'])
-            except anki.Refused as exc:
-                if 'No cards matched' not in str(exc):
-                    raise
-                self.notes.append(f"{deck['name']}: no weak cards to cram yet (none reviewed below 85%).")
+            except anki.Refused as exc:  # one cram deck failing doesn't stop the rest of the apply
+                if 'No cards matched' in str(exc):
+                    self.notes.append(f"{deck['name']}: no weak cards to cram yet (none reviewed below 85%).")
+                elif 'cram deck names' in str(exc):
+                    self.note(f"{deck['name']} not built: this machine's Anki runs a patch older than v9, which "
+                              "can't put a cram deck inside a grouped course deck. In the connectors clone: "
+                              "git pull, python3 anki/apply.py, then restart Anki.", attention=True)
+                else:
+                    self.note(f"{deck['name']} not built: {exc}", attention=True)
         for name in plan['cram_delete']:
             try:
                 self.client.call('studiousCramDelete', name=name)
@@ -375,6 +411,7 @@ def main(argv=None):
         run.step('obsidian sync', run.obsidian_sync, required=True)
         run.step('anki', run.ensure_anki, required=True)
         run.step('anki sync', run.anki_sync, required=True)
+        run.step('move decks', run.move_decks, required=True)  # before planning, or cards land in a new tree
         state, plan = run.step('plan', run.make_plan, required=True)
         if plan['push']:
             run.step('push cards', run.push, plan['push'])

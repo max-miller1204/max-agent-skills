@@ -50,18 +50,36 @@ def card_count(card):
     return 1
 
 
-def lessons(vault):
+def lesson_paths(vault):
+    """Every `lessons/*.md` under courses/ (`courses/[<group>/]<CODE>/lessons`), without walking into
+    practice code, dot-folders or the lessons folders themselves."""
+    found = []
+    for dirpath, dirnames, filenames in os.walk(vault / 'courses'):
+        if os.path.basename(dirpath) == 'lessons':
+            found += [Path(dirpath) / f for f in filenames if f.endswith('.md')]
+            dirnames[:] = []
+            continue
+        dirnames[:] = [d for d in dirnames if d != 'practice' and not d.startswith('.')]
+    return sorted(found)
+
+
+def lessons(vault, config=None):
+    config = anki.vault_config(vault) if config is None else config
     out = []
-    for path in sorted((vault / 'courses').glob('*/lessons/*.md')):
+    for path in lesson_paths(vault):
         text = path.read_text(encoding='utf-8')
         fm, _ = anki.read_frontmatter(text)
         if not fm.get('course'):
             continue
         m = re.match(r'(\d+)', path.stem)
         blocks = anki.parse_cards(text)
+        try:  # the full deck, so it matches the cards' decks in Anki; push reports a bad one
+            deck = anki.lesson_deck(config, fm['course'], fm['deck']) if fm.get('deck') else None
+        except anki.Refused:
+            deck = fm.get('deck')
         out.append(dict(
             path=str(path.relative_to(vault)), title=fm.get('title') or path.stem, course=str(fm['course']),
-            deck=fm.get('deck'), order=int(m.group(1)) if m else 999, goals=anki.as_list(fm.get('goals')),
+            deck=deck, order=int(m.group(1)) if m else 999, goals=anki.as_list(fm.get('goals')),
             done=bool(fm.get('done')), verified=bool(fm.get('verified')),
             cards=[dict(guid=b['meta'].get('id'), count=card_count(b), hash=anki.card_hash(text, b)) for b in blocks]))
     return out
@@ -69,7 +87,7 @@ def lessons(vault):
 
 def goals(vault):
     out = []
-    for path in sorted((vault / 'goals').glob('*.md')):
+    for path in sorted((vault / 'goals').glob('**/*.md')):  # goals/[<group>/]<COURSE>-<id>.md
         fm, _ = anki.read_frontmatter(path.read_text(encoding='utf-8'))
         if fm.get('type', 'goal') != 'goal' or not fm.get('id') or not fm.get('course'):
             continue
@@ -86,21 +104,50 @@ FORECAST_DAYS = 90
 
 def forecast(client, roots):
     """Expected reviews per day from Anki's FSRS simulator: per_new_card (the curve one new card
-    follows) and load (per course, the cards already reviewed). None when the open Anki's patch is
-    older than v8 or FSRS is off: the planner then uses its default curve and the cards' due dates."""
+    follows) and load (per course code, the cards already reviewed). `roots` maps each course code
+    to its root deck. None when the open Anki's patch is older than v8 or FSRS is off: the planner
+    then uses its default curve and the cards' due dates."""
     try:
-        fc = client.call('studiousForecast', roots=roots, days=FORECAST_DAYS)
+        fc = client.call('studiousForecast', roots=list(roots.values()), days=FORECAST_DAYS)
     except anki.Refused as exc:
         return dict(source='unavailable', reason=str(exc))
     return dict(source='anki', preset=fc['preset'], params=fc['params'], per_new_card=fc['perNewCard'],
-                load=fc['load'])
+                load={code: fc['load'][root] for code, root in roots.items() if root in fc['load']})
 
 
 def spell_courses(config, items):
     """The planner matches course codes exactly, Anki ignores case: spell them as the config does."""
-    spelling = {code.lower(): code for code in config.get('courses') or {}}
     for item in items:
-        item['course'] = spelling.get(item['course'].lower(), item['course'])
+        item['course'] = anki.course_code(config, item['course'])
+
+
+def placement(config, state):
+    """Warnings for notes outside their course's folders (a course whose group changed), and one
+    goal per (course, id): a goal in two notes would be planned twice and share one timetable. The
+    copy in the course's goal folder wins."""
+    warnings = []
+    for l in state['lessons']:
+        if anki.course_key(config, l['course']) is None:
+            continue
+        home = anki.course_dir(config, l['course']) + '/lessons/'
+        if not l['path'].lower().startswith(home.lower()):
+            warnings.append(f"{l['path']} is outside {l['course']}'s folder: move it to {home}")
+    by_goal = {}
+    for g in state['goals']:
+        by_goal.setdefault((g['course'].lower(), g['id'].lower()), []).append(g)
+    kept = []
+    for copies in by_goal.values():
+        home = anki.goal_dir(config, copies[0]['course']) + '/'
+        here = [g for g in copies if g['path'].lower().startswith(home.lower()) and '/' not in g['path'][len(home):]]
+        keep = (here or copies)[0]
+        kept.append(keep)
+        if len(copies) > 1:
+            warnings.append(f"{keep['course']} {keep['id']} is in {len(copies)} goal notes "
+                            f"({', '.join(g['path'] for g in copies)}): studious uses {keep['path']}; delete the others.")
+        elif not here and anki.course_key(config, keep['course']) is not None:
+            warnings.append(f"{keep['path']} is outside {keep['course']}'s goal folder: move it to {home}")
+    state['goals'] = [g for g in state['goals'] if g in kept]
+    return warnings
 
 
 def main(argv=None):
@@ -116,27 +163,37 @@ def main(argv=None):
     retired = vault / 'studious/retired.json'  # cards studious suspended for retired courses
     today = datetime.datetime.now(ZoneInfo(config.get('timezone') or 'America/New_York')).date()
     state = dict(today=args.today or today.isoformat(), config=config, config_set=sorted(mine),
-                 goals=goals(vault), lessons=lessons(vault), courses={}, errors=[],
+                 goals=goals(vault), lessons=[], courses={}, errors=[], warnings=[],
                  retired=json.loads(retired.read_text()) if retired.exists() else {},
                  pushed=anki.pushed_record(vault)[1])
-    spell_courses(config, state['goals'] + state['lessons'])
+    try:
+        state['lessons'] = lessons(vault, config)
+        spell_courses(config, state['goals'] + state['lessons'])
+        state['warnings'] = placement(config, state)
+        for goal in state['goals']:
+            goal['group'] = '/'.join(anki.course_group(config, goal['course']))
+        roots = {code: anki.course_root(config, code) for code in
+                 sorted({g['course'] for g in state['goals']} | {l['course'] for l in state['lessons']})}
+    except anki.Refused as exc:  # a bad `group` in the config
+        state['errors'].append(str(exc))
+        roots = {}
     client = anki.Anki(int(config.get('anki_port') or 8765), os.environ.get('STUDIOUS_ANKI_PROFILE') or config.get('anki_profile'))
     since = int((time.time() - args.since_days * 86400) * 1000)
-    codes = sorted({g['course'] for g in state['goals']} | {l['course'] for l in state['lessons']})
+    codes = sorted(roots)
     for code in codes:
         try:
-            seen = client.call('studiousObserve', root=code, sinceMs=since)
+            seen = client.call('studiousObserve', root=roots[code], sinceMs=since)
             state['courses'][code] = dict(
-                root=code, today=seen['today'], counts=seen['counts'], preset=seen['preset'], revlog=seen['revlog'],
+                root=roots[code], today=seen['today'], counts=seen['counts'], preset=seen['preset'], revlog=seen['revlog'],
                 cards=[{k: c[k] for k in ('cardId', 'noteId', 'guid', 'deck', 'type', 'queue', 'due', 'reps',
                                           'lapses', 'flag', 'suspended', 'tags', 'retrievability')} for c in seen['cards']])
         except anki.Refused as exc:
             if 'does not exist' in str(exc):
-                state['courses'][code] = dict(root=code, today=None, counts=dict(new=0, learning=0, review=0),
+                state['courses'][code] = dict(root=roots[code], today=None, counts=dict(new=0, learning=0, review=0),
                                               preset=None, revlog=[], cards=[])
             else:
                 state['errors'].append(f'{code}: {exc}')
-    state['forecast'] = forecast(client, [c for c in codes if state['courses'].get(c, {}).get('today') is not None])
+    state['forecast'] = forecast(client, {c: roots[c] for c in codes if state['courses'].get(c, {}).get('today') is not None})
     text = json.dumps(state, indent=1, ensure_ascii=False)
     if args.out:
         Path(args.out).write_text(text, encoding='utf-8')

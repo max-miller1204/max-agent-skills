@@ -231,7 +231,7 @@ def deadlines(cal, vault, days):
     wanted = config.get('deadline_calendars')
     chosen = [c for c in calendars if not wanted or c.get('summary') in wanted or c.get('id') in wanted]
     adopted = set()
-    for goal in (Path(vault) / 'goals').glob('*.md'):
+    for goal in (Path(vault) / 'goals').glob('**/*.md'):
         hit = re.search(r'^calendar_event_id:\s*(\S+)', goal.read_text(), re.M)
         if hit:
             adopted.add(hit.group(1).strip('"\''))

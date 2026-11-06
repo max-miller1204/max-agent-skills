@@ -62,9 +62,14 @@ def exam_tag(goal):
     return f"{goal['course']}::exam::{goal['id']}".lower()
 
 
-def cram_name(goal):
+def root_deck(goal, courses):
+    """The course's root deck from the snapshot (`<group>::<CODE>` with a group), else the code."""
+    return (courses.get(goal['course']) or {}).get('root') or goal['course']
+
+
+def cram_name(goal, courses):
     """Inside the course deck, so studying the course includes the cram cards."""
-    return f"{goal['course']}::{goal['id']} cram"
+    return f"{root_deck(goal, courses)}::{goal['id']} cram"
 
 
 def in_scope(card, goal):
@@ -142,7 +147,7 @@ def plan(state):
     retired = {code for code, c in course_cfg.items() if (c or {}).get('retired')}
     lessons = sorted((l for l in state.get('lessons') or [] if l['course'] not in retired),
                      key=lambda l: (l['course'], l['order'], l['path']))
-    warnings, inbox = [], []
+    warnings, inbox = list(state.get('warnings') or []), []
     for key in OBSOLETE_KEYS:
         if key in (state.get('config_set') or []):
             warnings.append(f"studious/config.md sets {key}, which is no longer used: the daily budget is "
@@ -179,15 +184,15 @@ def plan(state):
     cram_delete = []
     for g in sorted(state.get('goals') or [], key=lambda g: (g.get('date') or '9999', g['course'], g['id'])):
         if g.get('status', 'active') != 'active':
-            cram_delete.append(cram_name(g))  # archived or done, maybe before the run after its exam
+            cram_delete.append(cram_name(g, courses))  # archived or done, maybe before the run after its exam
             continue
         if g['course'] in retired:
-            cram_delete.append(cram_name(g))
+            cram_delete.append(cram_name(g, courses))
             continue
         days_left = (day(g['date']) - today).days if g.get('date') else None
         if days_left is not None and days_left < 0:
             inbox.append(f"{g['title']} was on {g['date']}: archive it, or carry its unread lessons into a later goal?")
-            cram_delete.append(cram_name(g))
+            cram_delete.append(cram_name(g, courses))
             continue
         scope_lessons = [l for l in lessons if l['course'] == g['course'] and g['id'] in l['goals']]
         cards = courses.get(g['course'], {}).get('cards') or []
@@ -504,10 +509,10 @@ def plan(state):
     cram = []
     for g in deck_goals:
         if g['days_left'] <= int(cfg['cram_days']):
-            cram.append(dict(name=cram_name(g), limit=9999,
-                             search=f'deck:"{g["course"]}" tag:{g["course"]}::exam::{g["id"]} prop:r<0.85'))
+            cram.append(dict(name=cram_name(g, courses), limit=9999,
+                             search=f'deck:"{root_deck(g, courses)}" tag:{g["course"]}::exam::{g["id"]} prop:r<0.85'))
     built = {d['name'] for d in cram}  # a goal that left cram mode (caught up, or `cram` unset) loses its deck
-    cram_delete += [cram_name(g) for g in goals_out if cram_name(g) not in built]
+    cram_delete += [cram_name(g, courses) for g in goals_out if cram_name(g, courses) not in built]
 
     # ---- the next days: card counts and calendar text ---------------------------------------------
     days = []

@@ -16,9 +16,12 @@ Commands (all print JSON):
   cards PATH...               list card blocks: path, id, type, title, line
   observe ROOT [--since-days N]
                               card states, FSRS estimates, revlog, today's counts for a course root deck
+                              (ROOT is a course code from the config, or a deck name)
   flagged ROOT                flagged cards of ROOT, matched to their lesson card blocks
   limits ROOT [--new N] [--today N] [--preset NAME]
                               a course root's own new cards/day ("This deck") and "Today only"
+  rename-deck OLD NEW         rename a deck and its subdecks (CS3214 -> <group>::CS3214), keeping
+                              cards and review history (patch v9)
   settings show               every Anki setting studious can change (presets, decks, collection, desktop)
   settings apply [--file F] [--dry-run]
                               apply `anki_settings` from the config (or a settings file) to Anki
@@ -104,6 +107,76 @@ def read_frontmatter(text):
 def vault_config(vault):
     path = Path(vault) / 'studious/config.md'
     return read_frontmatter(path.read_text(encoding='utf-8'))[0] if path.exists() else {}
+
+
+def course_key(config, code):
+    """The config's spelling of a course code, matched without regard to case (as Anki does), or None."""
+    code = str(code).lower()
+    return next((k for k in config.get('courses') or {} if str(k).lower() == code), None)
+
+
+def course_entry(config, code):
+    """A course's config entry ({} for a course the config doesn't list)."""
+    key = course_key(config, code)
+    return ((config.get('courses') or {}).get(key) or {}) if key is not None else {}
+
+
+def course_group(config, code):
+    """The course's `group` as a list of names: `Fall-2026` -> ['Fall-2026'], `Work/Rust` ->
+    ['Work', 'Rust'], none -> []. Any grouping the user likes: a semester, work, a project."""
+    group = str(course_entry(config, code).get('group') or '').strip().strip('/')
+    parts = [p.strip() for p in group.split('/')] if group else []
+    if any(not p or p in ('.', '..') or '::' in p or '"' in p or '\\' in p for p in parts):
+        raise Refused(f'courses.{code}.group {group!r}: use names separated by /, like Fall-2026 or Work/Rust')
+    return parts
+
+
+def course_code(config, code):
+    """The code as the config spells it (as given when the config doesn't list it)."""
+    key = course_key(config, code)
+    return str(key if key is not None else code)
+
+
+def course_root(config, code):
+    """A course's root deck in Anki: its group's decks, then the code (`Fall-2026::CS3214`,
+    `Work::Rust::K8s`), or just `<CODE>` without a group."""
+    return '::'.join(course_group(config, code) + [course_code(config, code)])
+
+
+def course_dir(config, code):
+    """A course's folder in the vault: `courses/<group>/<CODE>`, or `courses/<CODE>` without a group."""
+    return '/'.join(['courses'] + course_group(config, code) + [course_code(config, code)])
+
+
+def goal_dir(config, code):
+    """Where a course's goal notes go: `goals/<group>`, or `goals` without a group."""
+    return '/'.join(['goals'] + course_group(config, code))
+
+
+def resolve_root(config, name):
+    """A course code from the config becomes its root deck; any other name is a deck name already."""
+    return course_root(config, name) if course_key(config, name) is not None else name
+
+
+def lesson_deck(config, course, deck):
+    """The Anki deck a lesson's cards go to: its topic subdeck under the course deck. A lesson's
+    `deck` is the topic alone (`L_CondVars`) or ends in the course code and the topic
+    (`CS3214::L_CondVars`, `Fall-2026::CS3214::L_CondVars`); either way the course's group comes
+    from the config, so a lesson needs no edit when its course changes group."""
+    root = course_root(config, course)
+    parts = [p.strip() for p in str(deck).split('::')]
+    if not all(parts):
+        raise Refused(f'deck {deck!r} has an empty part')
+    lowered = [p.lower() for p in parts]
+    code = root.split('::')[-1].lower()
+    if code in lowered[:-1]:
+        topic = parts[lowered.index(code) + 1:]
+    elif len(parts) == 1:
+        topic = parts
+    else:
+        raise Refused(f"deck {deck!r} must be a topic (L_CondVars) or the course code and a topic "
+                      f"({root.split('::')[-1]}::L_CondVars)")
+    return '::'.join([root] + topic)
 
 
 def as_list(value):
@@ -419,6 +492,7 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
     connectors = connectors_dir()
     fields_by_type = note_fields(connectors)
     record_path, record = pushed_record(vault)
+    config = vault_config(vault)
     report = []
     for path in lesson_files(paths):
         text = path.read_text(encoding='utf-8')
@@ -432,8 +506,10 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
         if missing:
             entry['errors'].append(f'frontmatter needs {missing}')
             continue
-        if not str(lesson['deck']).lower().startswith(str(lesson['course']).lower() + '::'):
-            entry['errors'].append(f"deck {lesson['deck']!r} must be under the course deck ({lesson['course']}::...)")
+        try:
+            lesson = dict(lesson, deck=lesson_deck(config, lesson['course'], lesson['deck']))
+        except Refused as exc:
+            entry['errors'].append(str(exc))
             continue
         prefix = re.sub(r'[^a-z0-9]+', '', str(lesson['course']).lower())
         changed = False
@@ -559,6 +635,9 @@ def main(argv=None):
     p.add_argument('--search', required=True)
     p.add_argument('--limit', type=int, default=9999)
     sub.add_parser('cram-delete').add_argument('name')
+    p = sub.add_parser('rename-deck')
+    p.add_argument('old')
+    p.add_argument('new')
     sub.add_parser('sync')
     p = sub.add_parser('call')
     p.add_argument('action')
@@ -599,13 +678,13 @@ def main(argv=None):
         elif args.cmd == 'observe':
             import time
             since = int((time.time() - args.since_days * 86400) * 1000)
-            out = anki.call('studiousObserve', root=args.root, sinceMs=since)
+            out = anki.call('studiousObserve', root=resolve_root(config, args.root), sinceMs=since)
         elif args.cmd == 'flagged':
-            cards = anki.call('studiousObserve', root=args.root, sinceMs=0)['cards']
+            cards = anki.call('studiousObserve', root=resolve_root(config, args.root), sinceMs=0)['cards']
             out = [dict(cardId=c['cardId'], guid=c['guid'], flag=c['flag'], lapses=c['lapses'],
                         card=find_card(args.vault, c['guid'])) for c in cards if c['flag']]
         elif args.cmd == 'limits':
-            out = anki.call('studiousSetLimits', root=args.root, newPerDay=args.new, newToday=args.today,
+            out = anki.call('studiousSetLimits', root=resolve_root(config, args.root), newPerDay=args.new, newToday=args.today,
                             preset=args.preset)
         elif args.cmd == 'optimize':
             out = anki.call('studiousOptimize', minDays=args.min_days, dryRun=args.dry_run)
@@ -628,6 +707,8 @@ def main(argv=None):
             out = anki.call('studiousCram', name=args.name, search=args.search, limit=args.limit)
         elif args.cmd == 'cram-delete':
             out = anki.call('studiousCramDelete', name=args.name)
+        elif args.cmd == 'rename-deck':
+            out = anki.call('studiousRenameDeck', old=args.old, new=args.new)
         elif args.cmd == 'sync':
             out = anki.call('studiousSync')
         else:

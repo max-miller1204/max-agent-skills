@@ -65,11 +65,12 @@ sense, the card is wrong.
 ## Push and gating
 
 ```bash
-uv run scripts/anki.py push courses/CS3214/lessons/07-condition-variables.md
+uv run scripts/anki.py push courses/Fall-2026/CS3214/lessons/07-condition-variables.md
 ```
 
 Push assigns ids, refuses lessons that aren't `verified: true`, and creates new cards only after
 the lesson is `done: true` (or `--ungated` in cram mode). Cards already in Anki are updated in place,
 keeping their review history. Every push records each card's fingerprint in `studious/pushed.json`,
 and the daily run pushes again any lesson whose cards in Anki were edited since. The lesson's `deck`
-must sit under its course deck (`CS3214::...`).
+is its topic (`L_CondVars`); studious puts it under the course deck (`CS3214::L_CondVars`, or
+`<group>::CS3214::L_CondVars` when the course has a `group`). A `deck` naming another course is refused.

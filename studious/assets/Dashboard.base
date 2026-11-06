@@ -7,6 +7,8 @@ properties:
     displayName: Days left
   note.goal_note:
     displayName: Goal
+  note.group:
+    displayName: Group
   note.cram:
     displayName: Cram
   note.lessons_left:
@@ -23,6 +25,7 @@ views:
         - file.inFolder("timetable")
     order:
       - goal_note
+      - group
       - date
       - formula.days_left
       - cram
@@ -34,6 +37,7 @@ views:
         direction: ASC
     columnSize:
       note.goal_note: 220
+      note.group: 110
       note.date: 130
       formula.days_left: 85
       note.cram: 65

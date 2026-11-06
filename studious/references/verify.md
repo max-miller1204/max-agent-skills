@@ -23,5 +23,5 @@ Also check:
 
 When everything is pass or fixed, set `verified: true` in the lesson's frontmatter and write a short
 report to `studious/reports/<date>-verify-<lesson file name>.md`. Its first line after the title is
-`Lesson: [[courses/<COURSE>/lessons/<NN>-<slug>]]` (a link, so the report shows in the lesson's
+`Lesson: [[<lesson path without .md>]]` (for example `[[courses/Fall-2026/CS3214/lessons/07-condition-variables]]`; a link, so the report shows in the lesson's
 backlinks), then counts of pass/fix/drop and one line per fix or drop.

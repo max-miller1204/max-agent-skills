@@ -235,6 +235,7 @@ class FakeAnki:
             return [dict(guid=g) for g in params['guids'] if g in self.guids]
         assert action == 'studiousUpsertNotes'
         out = []
+        self.sent = getattr(self, 'sent', []) + params['notes']
         for n in params['notes']:
             out.append(dict(guid=n['guid'], action='updated' if n['guid'] in self.guids else 'created'))
             self.guids.add(n['guid'])
@@ -249,9 +250,16 @@ def write_lesson(vault, text):
 
 
 def test_push_refuses_a_deck_outside_the_course(tmp_path):
-    path = write_lesson(tmp_path, LESSON.replace('deck: CS3214::L_CondVars', 'deck: L_CondVars'))
+    path = write_lesson(tmp_path, LESSON.replace('deck: CS3214::L_CondVars', 'deck: CS9999::L_CondVars'))
     report = anki.push(FakeAnki(), str(tmp_path), [str(path)])
-    assert 'must be under the course deck' in report[0]['errors'][0]
+    assert 'must be a topic' in report[0]['errors'][0]
+
+
+def test_push_puts_a_bare_topic_under_the_course_deck(tmp_path):
+    path = write_lesson(tmp_path, LESSON.replace('deck: CS3214::L_CondVars', 'deck: L_CondVars').replace('done: false', 'done: true'))
+    fake = FakeAnki()
+    report = anki.push(fake, str(tmp_path), [str(path)])
+    assert report[0]['errors'] == [] and {n['deck'] for n in fake.sent} == {'CS3214::L_CondVars'}
 
 
 def test_push_records_what_snapshot_fingerprints(tmp_path):
@@ -310,3 +318,167 @@ def test_daily_run_stopped_before_anki_leaves_anki_alone(tmp_path, monkeypatch, 
     assert daily.main(['--vault', str(tmp_path), '--dry-run']) == 1
     summary = json.loads(capsys.readouterr().out)
     assert summary['errors'] == ['obsidian sync: studious-obsidian-sync is inactive']
+
+
+def test_a_group_nests_the_course_deck_and_folder():
+    config = {'courses': {'CS3214': {'folders': ['Fall-2026/cs3214'], 'group': 'Fall-2026'},
+                          'K8s': {'group': 'Work/Infra'}, 'CS1114': {}}}
+    assert anki.course_root(config, 'CS3214') == 'Fall-2026::CS3214'
+    assert anki.course_dir(config, 'CS3214') == 'courses/Fall-2026/CS3214'
+    assert anki.course_root(config, 'K8s') == 'Work::Infra::K8s'
+    assert anki.course_dir(config, 'K8s') == 'courses/Work/Infra/K8s'
+    assert anki.goal_dir(config, 'K8s') == 'goals/Work/Infra' and anki.goal_dir(config, 'CS1114') == 'goals'
+    assert anki.course_root(config, 'cs3214') == 'Fall-2026::CS3214'  # matched without case, spelled as the config does
+    assert anki.course_root(config, 'CS1114') == 'CS1114' and anki.course_dir(config, 'CS1114') == 'courses/CS1114'
+    assert anki.resolve_root(config, 'cs3214') == 'Fall-2026::CS3214'
+    assert anki.resolve_root(config, 'CS1114') == 'CS1114'
+    assert anki.resolve_root(config, 'Fall-2026::CS3214') == 'Fall-2026::CS3214'
+    for bad in ('Fall::2026', 'Work//Infra', 'a"b', '../Archive', 'Work/./Infra', 'a\\b'):
+        with pytest.raises(anki.Refused):
+            anki.course_root({'courses': {'X': {'group': bad}}}, 'X')
+
+
+def test_lesson_deck_follows_the_group_whatever_the_lesson_says():
+    config = {'courses': {'CS3214': {'group': 'Fall-2026'}}}
+    for written in ('L_CondVars', 'CS3214::L_CondVars', 'Fall-2026::CS3214::L_CondVars',
+                    'Spring-2026::CS3214::L_CondVars', 'cs3214::L_CondVars'):
+        assert anki.lesson_deck(config, 'CS3214', written) == 'Fall-2026::CS3214::L_CondVars', written
+    assert anki.lesson_deck(config, 'CS3214', 'CS3214::L1::Part2') == 'Fall-2026::CS3214::L1::Part2'
+    assert anki.lesson_deck({}, 'CS3214', 'L_CondVars') == 'CS3214::L_CondVars'
+    for bad in ('Other::L_CondVars', 'CS3214::', '::L1'):
+        with pytest.raises(anki.Refused):
+            anki.lesson_deck(config, 'CS3214', bad)
+
+
+def write_group_vault(vault, lesson_text):
+    (vault / 'studious').mkdir(parents=True, exist_ok=True)
+    (vault / 'studious/config.md').write_text(
+        '---\ncourses:\n  CS3214: {folders: [Fall-2026/cs3214], group: Fall-2026}\n---\n')
+    path = vault / 'courses/Fall-2026/CS3214/lessons/07-condvars.md'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(lesson_text, encoding='utf-8')
+    return path
+
+
+def test_push_with_a_group_wants_the_lesson_deck_under_the_group(tmp_path):
+    grouped_lesson = LESSON.replace('deck: CS3214::L_CondVars', 'deck: Fall-2026::CS3214::L_CondVars')
+    path = write_group_vault(tmp_path, grouped_lesson.replace('done: false', 'done: true'))
+    fake = FakeAnki()
+    report = anki.push(fake, str(tmp_path), [str(path)])
+    assert report[0]['errors'] == [] and report[0]['created'] == 2
+    path.write_text(LESSON.replace('done: false', 'done: true'))  # written before the course had a group
+    fake = FakeAnki()
+    report = anki.push(fake, str(tmp_path), [str(path)])
+    assert report[0]['errors'] == [] and {n['deck'] for n in fake.sent} == {'Fall-2026::CS3214::L_CondVars'}
+    (tmp_path / 'studious/config.md').write_text('---\ncourses:\n  CS3214: {group: "Fall::2026"}\n---\n')
+    report = anki.push(FakeAnki(), str(tmp_path), [str(path)])
+    assert 'use names separated by /' in report[0]['errors'][0]  # reported, not a crash
+
+
+def test_snapshot_finds_grouped_lessons_and_maps_the_forecast_to_course_codes(tmp_path):
+    sspec = importlib.util.spec_from_file_location('snapshot', SCRIPTS / 'snapshot.py')
+    snapshot = importlib.util.module_from_spec(sspec)
+    sspec.loader.exec_module(snapshot)
+    write_group_vault(tmp_path, LESSON.replace('deck: CS3214::L_CondVars', 'deck: L_CondVars'))
+    noise = tmp_path / 'courses/Fall-2026/CS3214/practice/07-x/lessons/readme.md'  # practice code isn't walked
+    noise.parent.mkdir(parents=True)
+    noise.write_text(LESSON)
+    found = snapshot.lessons(tmp_path)
+    assert [l['path'] for l in found] == ['courses/Fall-2026/CS3214/lessons/07-condvars.md']
+    assert found[0]['deck'] == 'Fall-2026::CS3214::L_CondVars'  # matches the cards' decks in Anki
+
+    class Forecasting:
+        def call(self, action, **params):
+            assert action == 'studiousForecast' and params['roots'] == ['Fall-2026::CS3214']
+            return dict(preset='studious', params=[], perNewCard=[1.0], load={'Fall-2026::CS3214': [3.0]})
+
+    fc = snapshot.forecast(Forecasting(), {'CS3214': 'Fall-2026::CS3214'})
+    assert fc['load'] == {'CS3214': [3.0]}
+
+
+def test_snapshot_reads_goals_in_group_folders(tmp_path):
+    sspec = importlib.util.spec_from_file_location('snapshot', SCRIPTS / 'snapshot.py')
+    snapshot = importlib.util.module_from_spec(sspec)
+    sspec.loader.exec_module(snapshot)
+    for rel in ('goals/Fall-2026/CS3214-Test2.md', 'goals/Other-Quiz1.md'):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        code = path.stem.split('-')[0]
+        path.write_text(f'---\ntype: goal\nid: {path.stem.split("-")[1]}\ncourse: {code}\n---\n')
+    found = {g['course']: g['path'] for g in snapshot.goals(tmp_path)}
+    assert found == {'CS3214': 'goals/Fall-2026/CS3214-Test2.md', 'Other': 'goals/Other-Quiz1.md'}
+
+
+def test_placement_warns_about_misplaced_notes_and_keeps_one_copy_of_a_goal():
+    sspec = importlib.util.spec_from_file_location('snapshot', SCRIPTS / 'snapshot.py')
+    snapshot = importlib.util.module_from_spec(sspec)
+    sspec.loader.exec_module(snapshot)
+    config = {'courses': {'CS3214': {'group': 'Fall-2026'}}}
+    state = dict(
+        lessons=[dict(course='CS3214', path='courses/Fall-2026/CS3214/lessons/01-a.md'),
+                 dict(course='CS3214', path='courses/CS3214/lessons/02-b.md'),
+                 dict(course='Other', path='courses/Other/lessons/01-a.md')],
+        goals=[dict(course='CS3214', id='Final', path='goals/CS3214-Final.md'),
+               dict(course='CS3214', id='Final', path='goals/Fall-2026/CS3214-Final.md'),
+               dict(course='CS3214', id='Test2', path='goals/CS3214-Test2.md'),
+               dict(course='Other', id='Quiz', path='goals/Other-Quiz.md')])
+    warnings = snapshot.placement(config, state)
+    assert [g['path'] for g in state['goals']] == ['goals/Fall-2026/CS3214-Final.md', 'goals/CS3214-Test2.md',
+                                                   'goals/Other-Quiz.md']
+    assert any('courses/CS3214/lessons/02-b.md is outside' in w for w in warnings)
+    assert any('CS3214 Final is in 2 goal notes' in w and 'uses goals/Fall-2026/CS3214-Final.md' in w for w in warnings)
+    assert any('goals/CS3214-Test2.md is outside' in w for w in warnings)
+    assert len(warnings) == 3  # nothing about Other, which has no group
+
+
+def test_daily_moves_a_deck_whose_group_changed(tmp_path):
+    dspec = importlib.util.spec_from_file_location('daily', SCRIPTS / 'daily.py')
+    daily = importlib.util.module_from_spec(dspec)
+    dspec.loader.exec_module(daily)
+    (tmp_path / 'studious').mkdir()
+    (tmp_path / 'studious/config.md').write_text(
+        '---\nanki_profile: Max\ncourses:\n  CS3214: {group: Fall-2026}\n  CS4824: {group: Fall-2026}\n'
+        '  Rust: {}\n  Two: {group: G}\n---\n')
+
+    class Client:
+        renamed = []
+
+        def call(self, action, **params):
+            if action == 'deckNames':
+                return ['CS3214', 'CS3214::L1', 'Fall-2026', 'Fall-2026::CS4824', 'Rust',
+                        'A::Two', 'B::Two', 'Fall-2026::CS4824::CS3214']
+            assert action == 'studiousRenameDeck'
+            self.renamed.append((params['old'], params['new']))
+
+    run = daily.Run(str(tmp_path), False)
+    run.client = Client()
+    moved = run.move_decks()
+    assert Client.renamed == [('CS3214', 'Fall-2026::CS3214')]  # not the CS4824 subdeck named CS3214
+    assert moved == [dict(course='CS3214', old='CS3214', new='Fall-2026::CS3214')]
+    assert any('Two: its deck G::Two' in n and '2 decks could be it' in n for n in run.notes)
+
+
+def test_a_refused_cram_deck_does_not_stop_the_rest_of_the_apply(tmp_path):
+    dspec = importlib.util.spec_from_file_location('daily', SCRIPTS / 'daily.py')
+    daily = importlib.util.module_from_spec(dspec)
+    dspec.loader.exec_module(daily)
+    (tmp_path / 'studious').mkdir()
+    (tmp_path / 'studious/config.md').write_text('---\nanki_profile: Max\n---\n')
+    calls = []
+
+    class OldPatch:
+        def call(self, action, **params):
+            calls.append(action)
+            if action == 'studiousApplySettings':
+                return dict(changes=[])
+            if action == 'studiousCram':
+                raise daily.anki.Refused('studious refused: cram deck names are "<root deck>::<goal> cram"')
+            return {}
+
+    run = daily.Run(str(tmp_path), False)
+    run.client = OldPatch()
+    plan = dict(courses={}, total_new_per_day=0, cram=[dict(name='Fall-2026::CS3214::Test2 cram', search='x', limit=1)],
+                cram_delete=['Fall-2026::CS3214::Old cram'], suspend=[1], unsuspend=[], retired={})
+    assert run.apply(plan) == 'applied'
+    assert calls[-2:] == ['studiousCramDelete', 'studiousSuspend']
+    assert any('older than v9' in n for n in run.notes)

@@ -77,7 +77,8 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
 
 ## Goals
 
-`goals/<COURSE>-<id>.md`, copied from `assets/goal.md` (its `## Lessons` table lists the goal's
+`goals/<COURSE>-<id>.md`, or `goals/<group>/<COURSE>-<id>.md` when the course has a `group`
+(`anki.goal_dir` gives the folder), copied from `assets/goal.md` (its `## Lessons` table lists the goal's
 lessons with their checkboxes; keep it as is). The properties:
 
 ```yaml
@@ -121,15 +122,25 @@ against the source, push the lesson (updates keep review history), then clear th
 ## Files
 
 ```
-studious/config.md      settings (references/onboarding.md)    goals/<COURSE>-<id>.md
-studious/inbox.md       decisions waiting for the user          courses/<COURSE>/lessons/<NN>-<slug>.md
-studious/manifests/     ingested source hashes                  courses/<COURSE>/practice/<NN>-<slug>/
+studious/config.md      settings (references/onboarding.md)    goals/[<group>/]<COURSE>-<id>.md
+studious/inbox.md       decisions waiting for the user          courses/[<group>/]<COURSE>/lessons/<NN>-<slug>.md
+studious/manifests/     ingested source hashes                  courses/[<group>/]<COURSE>/practice/<NN>-<slug>/
 studious/reports/       verification and flag-fix reports       timetable/<COURSE>-<id> timetable.md
 studious/calendar.json  managed calendar events                 attachments/
 studious/retired.json   cards suspended for retired courses
 studious/pushed.json    each card's fingerprint at its last push
 Dashboard.base          lesson and goal views (Obsidian Bases)
 ```
+
+A course with a `group` in the config (a semester, work, a project: `group: Fall-2026`, nested as
+`group: Work/Infra`) has its folder at `courses/Fall-2026/CS3214/`, its goals in `goals/Fall-2026/` and its Anki deck at
+`Fall-2026::CS3214`, so the group's parent deck studies every course in it together. Without a
+group it's `courses/CS3214/`, `goals/` and `CS3214`. Timetables stay flat in `timetable/` (only active
+goals have one) and carry the group as a property. Tags and goal names keep the bare code
+(`CS3214::exam::Test2`), and a lesson's `deck` is only its topic (`L_CondVars`). Use `anki.course_dir`,
+`anki.goal_dir`, `anki.course_root` and `anki.lesson_deck` rather than building paths. When a course's
+group changes, the next daily run renames its Anki deck, and the inbox lists any lesson or goal
+note left outside the course's folders until it's moved.
 
 Scripts: `anki.py` (Anki), `snapshot.py` → `plan.py` (pure planner) → `timetable.py`,
 `calendar_events.py` (Google Calendar via google-calendar-mcp: daily events, deadline scan),

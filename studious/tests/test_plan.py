@@ -108,6 +108,16 @@ def test_cram_deck_in_the_final_days():
                               search='deck:"CS3214" tag:CS3214::exam::Test2 prop:r<0.85')]
 
 
+
+def test_cram_deck_sits_inside_a_grouped_course_deck():
+    ls = [lesson(n) for n in range(1, 4)]
+    courses = {'CS3214': dict(course([]), root='Fall-2026::CS3214')}
+    p = planner.plan(state([goal(date='2026-11-03')], ls, courses=courses))
+    assert p['cram'] == [dict(name='Fall-2026::CS3214::Test2 cram', limit=9999,
+                              search='deck:"Fall-2026::CS3214" tag:CS3214::exam::Test2 prop:r<0.85')]
+    p = planner.plan(state([goal(date='2026-11-03', status='archived')], ls, courses=courses))
+    assert p['cram_delete'] == ['Fall-2026::CS3214::Test2 cram']
+
 def test_forced_cram():
     p = planner.plan(state([goal(date='2026-12-20', cram=True)], [lesson(1)]))
     assert p['goals'][0]['cram'] and p['push'][0]['ungated']
@@ -346,6 +356,11 @@ def test_timetable_rows_now_and_sessions():
     assert f"cards_left: {p['goals'][0]['unseen']}" in md
     assert 'new_cards_today:' in md and 'minutes' not in md
     assert '"[[courses/CS3214/lessons/01-l1|lesson1]]"' in md and 'goal_note: "[[goals/CS3214-Test2|' in md
+    assert 'group:' not in md  # no group, no property
+    grouped = dict(s['goals'][0], group='Fall-2026', path='goals/Fall-2026/CS3214-Test2.md')
+    md = timetable.render(s, grouped)
+    assert 'group: "Fall-2026"' in md and 'goal_note: "[[goals/Fall-2026/CS3214-Test2|' in md
+    assert timetable.filename(grouped) == 'CS3214-Test2 timetable.md'  # timetables stay flat
 
 
 def test_done_course_gets_no_new_cards():
