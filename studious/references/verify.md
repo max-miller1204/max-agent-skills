@@ -20,6 +20,9 @@ Also check:
   `[!analogy]` needs no source, but must not contradict them.)
 - Practice answers are right, and runnable exercises actually build and behave as described
   (run them).
+- Every practice problem earns its slot (lessons.md, Practice): one that only repeats another
+  problem, a checkpoint or a card is a **drop**, and an idea worth practicing with no problem is a
+  **fix**.
 - Every card has a `Source`, one objective, and the right note type for its answer.
 - Code snippets match the course code they cite.
 - Coverage: go through every slide or page of each source, including figure-only ones (look at the

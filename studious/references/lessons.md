@@ -92,9 +92,11 @@ precise version, never instead of it.
      algorithm) gets a `> [!question]- Try: …` checkpoint instead, a small problem with its worked
      answer. Short recall questions belong in the cards, not here.
    - a source line: `*Source: conditionvariables.pdf slides 8-9.*`
-5. `## Practice`: fresh problems that need the ideas, not the wording, as many as the material
-   needs to practice every idea worth practicing (no quota: a light lecture might need 3, a dense
-   one 15). Mix kinds:
+5. `## Practice`: fresh problems that need the ideas, not the wording. There's no quota, but each
+   problem has to earn its slot: it practices something no other problem, checkpoint or card
+   already drills (a different idea, or a different kind of task on it). Together they cover every
+   idea worth practicing. Most lessons land at 3 to 8; that describes what's typical, it isn't a
+   limit. Mix kinds:
    predict an interleaving or output, find the bug, write or fix code, explain a design choice,
    compute something. Each answer is in a folded `> [!success]- Answer` callout with the reasoning.
    For programming topics, include at least one runnable exercise: put the files in
