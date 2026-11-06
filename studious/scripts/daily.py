@@ -403,8 +403,9 @@ class Run:
         if self.orphans:
             lines += ['## Suspended (card block gone)', '',
                       'No lesson has these card blocks any more, so their Anki notes were suspended (review '
-                      'history kept). Put a block back in a verified lesson to bring its note back; delete the '
-                      'note in Anki only if it is gone for good.', ''] + [f'- {n}' for n in self.orphans] + ['']
+                      'history kept). Put a block back in a verified lesson to bring its note back. If one is '
+                      'gone for good, ask the agent to delete it (`anki.py delete-notes`, with a dry run '
+                      'first).', ''] + [f'- {n}' for n in self.orphans] + ['']
         if self.errors:
             lines += ['## Problems in the last run', ''] + [f'- {e}' for e in self.errors] + ['']
         if len(lines) == 4:
