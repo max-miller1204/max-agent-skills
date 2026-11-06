@@ -12,7 +12,8 @@ pages, code lines and so on, don't trust memory) and returns, per item:
 - **fix**: the correction, applied directly in the file (wrong detail, missing assumption,
   ambiguous question, answer that accepts the wrong thing, bad citation, Unicode math).
 - **drop**: unsupported and not fixable from the sources, or a card that breaks the rules in
-  cards.md (two objectives, needs context, trivia, duplicate). Remove it from the file.
+  cards.md (two objectives, needs context, trivia, duplicate). Remove it from the file; if it was
+  already in Anki, the daily run suspends its note (cards.md, Removing a card).
 
 Also check:
 - Content beyond the sources is inside `> [!supplementary]` and says where it comes from.

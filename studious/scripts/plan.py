@@ -42,6 +42,10 @@ Rules (Anki and FSRS guidance on workload, plus lesson pacing):
 - A course marked `retired: true` drops out of planning (no lessons, pushes, goals or inbox items) and
   its cards are suspended; the cards studious suspended are recorded (state `retired`), so taking the
   flag off unsuspends exactly those and leaves cards suspended by hand alone.
+- A note studious made whose card block is gone from the whole vault (a verify drop, a split or
+  merge, a rewrite) is suspended and recorded (state `orphaned`); a card moved to another lesson or
+  course is not one. When its guid is back in a verified lesson, the recorded cards are unsuspended.
+  A course with such notes but no lesson at all is held with a warning instead (see `orphans`).
 - The calendar's later days come from the same placement: each day's new cards and the reviews
   expected that day, assuming each day's reviews get done.
 """
@@ -49,6 +53,7 @@ import argparse
 import datetime
 import json
 import math
+import re
 import sys
 
 WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -136,6 +141,63 @@ class Load:
             self.load[d] += x * self.w[d - t]
 
 
+GUID_SHAPE = re.compile(r'[a-z0-9]+_[0-9a-f]{12}')  # the guids anki.py's push makes
+
+
+def orphans(state, retired):
+    """Notes whose card block is gone from the vault, and notes whose block came back.
+
+    An orphan is a card of a non-retired course's root deck that studious made (a guid of its shape,
+    or one in `pushed`) and whose guid is in no card block anywhere in the vault (state
+    `vault_guids`), so a card moved to another lesson or course isn't one. Its unsuspended cards are
+    suspended and recorded (state `orphaned`); cards already suspended are left alone. A course with
+    orphans but no lesson at all is held with a warning (a folder missing from a sync). A recorded
+    note whose guid is back in a verified lesson gets the recorded cards unsuspended; one deleted
+    from Anki drops out of the record."""
+    courses = state.get('courses') or {}
+    record = {guid: dict(entry) for guid, entry in (state.get('orphaned') or {}).items()}
+    out = dict(suspend=[], unsuspend=[], new=[], warnings=[], record=record)
+    if state.get('vault_guids') is None:  # a state from before orphan detection
+        return out
+    in_vault, pushed = set(state['vault_guids']), state.get('pushed') or {}
+    lessons = [l for l in state.get('lessons') or [] if l['course'] not in retired]
+    verified = {c['guid'] for l in lessons if l['verified'] for c in l['cards'] if c.get('guid')}
+    by_card = {c['cardId']: c for course in courses.values() for c in course.get('cards') or []}
+    in_anki = {c['guid'] for c in by_card.values()}
+    observed = {code for code, course in courses.items() if course.get('today') is not None}
+    for guid in sorted(record):
+        entry = record[guid]
+        if guid in verified:
+            out['unsuspend'] += [i for i in entry.get('cardIds') or [] if (by_card.get(i) or {}).get('suspended')]
+            del record[guid]
+        elif guid not in in_anki and entry.get('course') in observed:
+            del record[guid]  # the note was deleted in Anki
+    with_lessons = {l['course'] for l in lessons}
+    for code in sorted(set(courses) - retired):
+        notes = {}
+        for c in courses[code].get('cards') or []:
+            guid = c.get('guid') or ''
+            if guid not in in_vault and (GUID_SHAPE.fullmatch(guid) or guid in pushed):
+                notes.setdefault(guid, []).append(c)
+        if not notes:
+            continue
+        if code not in with_lessons:
+            out['warnings'].append(
+                f"{code}: {plural(len(notes), 'note')} in Anki have no card block in the vault, and no lesson of "
+                f"{code} was found, so none were suspended. If its lessons are gone for good, set `retired: true` "
+                f"for {code} in the config; otherwise check its lessons folder.")
+            continue
+        for guid, cards in sorted(notes.items()):
+            ids = sorted(c['cardId'] for c in cards if not c['suspended'])
+            if not ids:
+                continue  # suspended already, by hand or by an earlier run
+            out['suspend'] += ids
+            entry = record.setdefault(guid, dict(course=code, cardIds=[]))
+            entry['cardIds'] = sorted(set(entry.get('cardIds') or []) | set(ids))
+            out['new'].append(dict(guid=guid, course=code, deck=cards[0].get('deck'), cardIds=ids))
+    return out
+
+
 def plan(state):
     today = day(state['today'])
     cfg = state['config']
@@ -145,9 +207,16 @@ def plan(state):
     courses = state.get('courses') or {}
     course_cfg = cfg.get('courses') or {}
     retired = {code for code, c in course_cfg.items() if (c or {}).get('retired')}
+    orphaned = orphans(state, retired)
+    if orphaned['suspend'] or orphaned['unsuspend']:  # plan with the cards as they'll be after the apply
+        off, on = set(orphaned['suspend']), set(orphaned['unsuspend'])
+        courses = {code: dict(course, cards=[dict(c, suspended=True) if c['cardId'] in off else
+                                             dict(c, suspended=False) if c['cardId'] in on else c
+                                             for c in course.get('cards') or []])
+                   for code, course in courses.items()}
     lessons = sorted((l for l in state.get('lessons') or [] if l['course'] not in retired),
                      key=lambda l: (l['course'], l['order'], l['path']))
-    warnings, inbox = list(state.get('warnings') or []), []
+    warnings, inbox = list(state.get('warnings') or []) + orphaned['warnings'], []
     for key in OBSOLETE_KEYS:
         if key in (state.get('config_set') or []):
             warnings.append(f"studious/config.md sets {key}, which is no longer used: the daily budget is "
@@ -554,7 +623,8 @@ def plan(state):
             record[code] = sorted(set(record.get(code) or []) | set(ids))
         else:
             mine = set(record.pop(code))
-            unsuspend += [c['cardId'] for c in cards if c['cardId'] in mine and c['suspended']]
+            held = {i for e in orphaned['record'].values() for i in e.get('cardIds') or []}  # still orphaned
+            unsuspend += [c['cardId'] for c in cards if c['cardId'] in mine and c['suspended'] and c['cardId'] not in held]
 
     for code in sorted({g['course'] for g in state.get('goals') or []} - retired):
         mine = [g for g in state.get('goals') or [] if g['course'] == code and g.get('date')]
@@ -567,7 +637,9 @@ def plan(state):
                 load=load_info,
                 goals=goals_out, courses=course_out,
                 push=push, cram=cram, cram_delete=sorted(set(cram_delete)), days=days,
-                suspend=suspend, unsuspend=unsuspend, retired=record, inbox=inbox, warnings=warnings)
+                suspend=suspend, unsuspend=unsuspend, retired=record, inbox=inbox, warnings=warnings,
+                orphans=dict(suspend=orphaned['suspend'], unsuspend=orphaned['unsuspend'], new=orphaned['new']),
+                orphaned=orphaned['record'])
 
 
 def main(argv=None):

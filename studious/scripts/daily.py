@@ -12,7 +12,9 @@
    root (`CS3214` -> `Fall-2026::CS3214`), keeping its cards and review history.
 3. Snapshot and plan; push the cards of lessons marked done (or all in-scope cards in cram mode),
    and edits and retags of cards already in Anki; re-snapshot and re-plan if anything was pushed.
-4. Apply the plan to Anki: new cards/day per course, today-only overrides, reposition, cram decks.
+4. Apply the plan to Anki: new cards/day per course, today-only overrides, reposition, cram decks;
+   suspend notes whose card block is gone from the vault (listed in the inbox) and unsuspend those
+   whose block is back.
 5. Regenerate the timetables, write the calendar events.
 6. AnkiWeb sync again, quit Anki if this run started it, write the inbox, commit the vault (local git).
 7. Write a run log outside the vault, to ~/.local/state/studious/runs/<vault>/ (the last 60 are kept).
@@ -22,10 +24,12 @@ that need the user, such as a skipped AnkiWeb sync).
 """
 import argparse
 import datetime
+import html
 import importlib.util
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -127,6 +131,7 @@ class Run:
                                 os.environ.get('STUDIOUS_ANKI_PROFILE') or self.config.get('anki_profile'))
         self.steps, self.errors, self.notes = [], [], []
         self.attention = []  # notes the user has to act on: they go to the inbox too
+        self.orphans = []  # notes suspended this run because their card block is gone: listed in the inbox
         self.launched_anki = False
         self.pushed = False  # whether a push changed Anki, even if another lesson failed
 
@@ -307,7 +312,37 @@ class Run:
         if plan['suspend'] or plan['unsuspend']:
             self.notes.append(f"Retired courses: {len(plan['suspend'])} cards suspended, "
                               f"{len(plan['unsuspend'])} unsuspended.")
+        self.apply_orphans(plan)
         return 'applied'
+
+    def apply_orphans(self, plan):
+        """Suspend the notes whose card block is gone (listed in the inbox), unsuspend those whose block
+        is back, and keep studious/orphaned.json to match."""
+        orphans = plan.get('orphans') or {}
+        if orphans.get('suspend'):
+            self.client.call('studiousSuspend', cardIds=orphans['suspend'], suspended=True)
+        if orphans.get('unsuspend'):
+            self.client.call('studiousSuspend', cardIds=orphans['unsuspend'], suspended=False)
+        record = self.vault / 'studious/orphaned.json'
+        if plan.get('orphaned') or record.exists():
+            record.write_text(json.dumps(plan.get('orphaned') or {}, indent=1, sort_keys=True) + '\n')
+        new = orphans.get('new') or []
+        fronts = {}
+        if new:
+            try:  # the start of each note's first field, so the inbox line is recognisable
+                for n in self.client.call('studiousNotes', guids=[o['guid'] for o in new]):
+                    first = next(iter(n['fields'].values()), '')
+                    text = re.sub(r'<(?:br|/?(?:p|div|li|tr|pre))\b[^>]*>', ' ', first)  # blocks break words
+                    fronts[n['guid']] = ' '.join(html.unescape(re.sub(r'<[^>]+>', '', text)).split())
+            except anki.Refused:
+                pass
+        for o in new:
+            front = fronts.get(o['guid'], '')
+            front = f' "{front[:70]}{"..." if len(front) > 70 else ""}"' if front else ''
+            self.orphans.append(f"{o['course']}: `{o['guid']}`{front} in {o['deck']}")
+        if new or orphans.get('unsuspend'):
+            self.notes.append(f"Card blocks gone from the vault: {planner.plural(len(new), 'note')} suspended, "
+                              f"{len(orphans.get('unsuspend') or [])} cards of restored blocks unsuspended.")
 
     def optimize(self):
         """FSRS optimization once `fsrs_optimize_days` have passed since the last one (Anki counts)."""
@@ -358,6 +393,11 @@ class Run:
                 lines += ['## Warnings', ''] + [f'- {w}' for w in plan['warnings']] + ['']
         if self.attention:
             lines += ['## Needs you', ''] + [f'- {n}' for n in self.attention] + ['']
+        if self.orphans:
+            lines += ['## Suspended (card block gone)', '',
+                      'No lesson has these card blocks any more, so their Anki notes were suspended (review '
+                      'history kept). Put a block back in a verified lesson to bring its note back; delete the '
+                      'note in Anki only if it is gone for good.', ''] + [f'- {n}' for n in self.orphans] + ['']
         if self.errors:
             lines += ['## Problems in the last run', ''] + [f'- {e}' for e in self.errors] + ['']
         if len(lines) == 4:

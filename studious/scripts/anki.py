@@ -50,6 +50,9 @@ Card blocks live in lesson notes (see references/cards.md):
 `push` gives every card without an id a GUID (`<course>_<12 hex>`) and writes it back into the
 note. It creates a card in Anki only when the lesson has `verified: true` and `done: true`
 (or `--ungated`, for cram mode). Cards already in Anki are updated whenever the lesson is verified.
+
+A note whose block is gone from every lesson is suspended by the daily run (plan.py, recorded in
+`studious/orphaned.json`); when `push` sends its guid again, it unsuspends the cards it suspended.
 """
 import argparse
 import base64
@@ -341,6 +344,36 @@ def pushed_record(vault):
     return path, (json.loads(path.read_text()) if path.exists() else {})
 
 
+def orphaned_record(vault):
+    """studious/orphaned.json: guid -> {course, cardIds} for the notes studious suspended because no
+    card block in the vault has their guid any more (see plan.py)."""
+    path = Path(vault) / 'studious/orphaned.json'
+    return path, (json.loads(path.read_text()) if path.exists() else {})
+
+
+STUDIOUS_GUID = re.compile(r'[a-z0-9]+_[0-9a-f]{12}')  # what new_guid makes
+
+
+def studious_owned(guid, pushed=()):
+    """Whether studious made this note: a guid of its shape, or one it has pushed."""
+    return bool(STUDIOUS_GUID.fullmatch(guid or '')) or guid in pushed
+
+
+def vault_guids(vault):
+    """The guid of every card block anywhere in the vault, outside dot-folders (.git, .obsidian,
+    .trash): a card moved to another lesson or course, or sitting in a misplaced lesson, still counts."""
+    found = set()
+    for dirpath, dirnames, filenames in os.walk(vault):
+        dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+        for name in filenames:
+            if not name.endswith('.md'):
+                continue
+            text = Path(dirpath, name).read_text(encoding='utf-8', errors='replace')
+            if '[!card]' in text:
+                found |= {c['meta']['id'] for c in parse_cards(text) if c['meta'].get('id')}
+    return found
+
+
 # ---- markdown -> Anki HTML -------------------------------------------------------------------------
 
 MD = MarkdownIt('commonmark', {'html': True, 'breaks': True}).enable(['table', 'strikethrough'])
@@ -492,6 +525,8 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
     connectors = connectors_dir()
     fields_by_type = note_fields(connectors)
     record_path, record = pushed_record(vault)
+    orphans_path, orphans = orphaned_record(vault)
+    orphans_before = dict(orphans)
     config = vault_config(vault)
     report = []
     for path in lesson_files(paths):
@@ -570,9 +605,25 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
         for r in results:
             entry[r['action']] += 1
             record[r['guid']] = hashes[r['guid']]
+        # A note studious suspended when its block went missing is back in a verified lesson: unsuspend
+        # the cards it suspended (only those; any suspended by hand stay so).
+        back = [r['guid'] for r in results if r['guid'] in orphans]
+        ids = sorted({i for g in back for i in orphans[g].get('cardIds') or []})
+        if ids:
+            try:
+                anki.call('studiousSuspend', cardIds=ids, suspended=False)
+            except Refused as exc:
+                entry['errors'].append(f'unsuspending restored cards: {exc}')
+                continue
+        for guid in back:
+            orphans.pop(guid)
+        if back:
+            entry['restored'] = len(back)
     if not dry_run and Path(vault).is_dir():
         record_path.parent.mkdir(parents=True, exist_ok=True)
         record_path.write_text(json.dumps(record, indent=1, sort_keys=True) + '\n')
+        if orphans != orphans_before:
+            orphans_path.write_text(json.dumps(orphans, indent=1, sort_keys=True) + '\n')
     return report
 
 
@@ -681,8 +732,15 @@ def main(argv=None):
             out = anki.call('studiousObserve', root=resolve_root(config, args.root), sinceMs=since)
         elif args.cmd == 'flagged':
             cards = anki.call('studiousObserve', root=resolve_root(config, args.root), sinceMs=0)['cards']
-            out = [dict(cardId=c['cardId'], guid=c['guid'], flag=c['flag'], lapses=c['lapses'],
-                        card=find_card(args.vault, c['guid'])) for c in cards if c['flag']]
+            pushed = pushed_record(args.vault)[1]
+            out = []
+            for c in cards:
+                if not c['flag']:
+                    continue
+                block = find_card(args.vault, c['guid'])
+                # orphaned: studious made it but no lesson has its block (the daily run suspends it)
+                out.append(dict(cardId=c['cardId'], guid=c['guid'], flag=c['flag'], lapses=c['lapses'], card=block,
+                                orphaned=block is None and studious_owned(c['guid'], pushed)))
         elif args.cmd == 'limits':
             out = anki.call('studiousSetLimits', root=resolve_root(config, args.root), newPerDay=args.new, newToday=args.today,
                             preset=args.preset)

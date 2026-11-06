@@ -499,3 +499,81 @@ def test_the_day_before_counts_toward_fitting_under_the_cap():
     p = planner.plan(state([goal(date='2026-11-04')], courses={'CS3214': course(cards)}, cards_per_day=60))
     assert sum(d['new'] for d in p['days'][:3]) == 90 and p['days'][2]['new'] > 0
     assert p['warnings'] == [] and not p['goals'][0]['cram']
+
+
+# ---- orphans: notes whose card block is gone from the vault ----------------------------------------
+
+def orphan_state(cards, lessons=None, vault_guids=(), **kw):
+    s = state(lessons=lessons if lessons is not None else [lesson(1)],
+              courses={'CS3214': dict(course(cards), root='Fall-2026::CS3214')})
+    s.update({**dict(pushed={}, orphaned={}), **kw, "vault_guids": list(vault_guids)})
+    return s
+
+
+def test_a_note_without_a_block_is_suspended_and_recorded():
+    gone, kept = 'cs3214_aaaaaaaaaaaa', 'cs3214_bbbbbbbbbbbb'
+    cards = [card(1, guid=gone, deck='Fall-2026::CS3214::L01'), card(2, guid=gone), card(3, guid=kept),
+             card(4, guid='Xy$hand-made'), card(5, guid='cs3214_cccccccccccc'), card(6, guid='old-guid')]
+    cards[4]['suspended'] = True  # suspended by hand: left alone, never recorded
+    p = planner.plan(orphan_state(cards, vault_guids=[kept], pushed={'old-guid': 'h'}))
+    assert p['orphans']['suspend'] == [1, 2, 6] and p['orphans']['unsuspend'] == []
+    assert p['orphaned'] == {gone: dict(course='CS3214', cardIds=[1, 2]), 'old-guid': dict(course='CS3214', cardIds=[6])}
+    assert p['orphans']['new'][0] == dict(guid=gone, course='CS3214', deck='Fall-2026::CS3214::L01', cardIds=[1, 2])
+    assert p['courses']['CS3214']['new_per_day'] == 2  # planned as suspended: only cards 3 and 4 are new
+
+
+def test_a_card_moved_to_another_lesson_or_course_is_not_an_orphan():
+    moved = 'cs3214_aaaaaaaaaaaa'
+    s = orphan_state([card(1, guid=moved)], vault_guids=[moved])  # its block now sits in a CS4824 lesson
+    p = planner.plan(s)
+    assert p['orphans'] == dict(suspend=[], unsuspend=[], new=[]) and p['orphaned'] == {}
+
+
+def test_a_block_back_in_a_verified_lesson_unsuspends_what_studious_suspended():
+    back = 'cs3214_aaaaaaaaaaaa'
+    cards = [card(1, guid=back), card(2, guid=back)]
+    for c in cards:
+        c['suspended'] = True
+    restored = lesson(1)
+    restored['cards'][0]['guid'] = back
+    s = orphan_state(cards, lessons=[restored], vault_guids=[back], orphaned={back: dict(course='CS3214', cardIds=[1])})
+    p = planner.plan(s)
+    assert p['orphans']['unsuspend'] == [1] and p['orphaned'] == {}  # card 2 was suspended by hand
+    restored['verified'] = False  # back, but in a lesson still being rewritten: stays suspended
+    p = planner.plan(s)
+    assert p['orphans']['unsuspend'] == [] and back in p['orphaned']
+
+
+def test_a_recorded_note_deleted_in_anki_leaves_the_record():
+    s = orphan_state([], orphaned={'cs3214_aaaaaaaaaaaa': dict(course='CS3214', cardIds=[1])})
+    assert planner.plan(s)['orphaned'] == {}
+
+
+def test_a_course_with_no_lessons_at_all_is_held_with_a_warning():
+    p = planner.plan(orphan_state([card(1, guid='cs3214_aaaaaaaaaaaa')], lessons=[]))
+    assert p['orphans']['suspend'] == [] and p['orphaned'] == {}
+    assert any('no lesson of CS3214 was found' in w for w in p['warnings'])
+
+
+def test_orphans_of_a_retired_course_are_left_to_the_retired_rule():
+    s = orphan_state([card(1, guid='cs3214_aaaaaaaaaaaa')])
+    s['config']['courses'] = {'CS3214': {'retired': True}}
+    p = planner.plan(s)
+    assert p['orphans']['suspend'] == [] and p['suspend'] == [1]
+
+
+def test_unretiring_keeps_an_orphan_suspended():
+    gone = 'cs3214_aaaaaaaaaaaa'
+    cards = [card(1, guid=gone), card(2, guid='cs3214_bbbbbbbbbbbb')]
+    for c in cards:
+        c['suspended'] = True
+    s = orphan_state(cards, vault_guids=['cs3214_bbbbbbbbbbbb'], retired={'CS3214': [1, 2]},
+                     orphaned={gone: dict(course='CS3214', cardIds=[1])})
+    p = planner.plan(s)
+    assert p['unsuspend'] == [2] and p['orphaned'] == {gone: dict(course='CS3214', cardIds=[1])}
+
+
+def test_a_state_without_vault_guids_detects_nothing():
+    s = orphan_state([card(1, guid='cs3214_aaaaaaaaaaaa')])
+    del s['vault_guids']
+    assert planner.plan(s)['orphans']['suspend'] == []

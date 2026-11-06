@@ -165,7 +165,8 @@ def main(argv=None):
     state = dict(today=args.today or today.isoformat(), config=config, config_set=sorted(mine),
                  goals=goals(vault), lessons=[], courses={}, errors=[], warnings=[],
                  retired=json.loads(retired.read_text()) if retired.exists() else {},
-                 pushed=anki.pushed_record(vault)[1])
+                 pushed=anki.pushed_record(vault)[1], orphaned=anki.orphaned_record(vault)[1])
+    state['vault_guids'] = sorted(anki.vault_guids(vault))  # every card block, for orphan detection
     try:
         state['lessons'] = lessons(vault, config)
         spell_courses(config, state['goals'] + state['lessons'])

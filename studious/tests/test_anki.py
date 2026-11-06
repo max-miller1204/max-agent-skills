@@ -482,3 +482,146 @@ def test_a_refused_cram_deck_does_not_stop_the_rest_of_the_apply(tmp_path):
     assert run.apply(plan) == 'applied'
     assert calls[-2:] == ['studiousCramDelete', 'studiousSuspend']
     assert any('older than v9' in n for n in run.notes)
+
+
+# ---- orphans: a card block removed from the vault ----------------------------------------------------
+
+class FakeCollection:
+    """Enough of the patched AnkiConnect for whole daily runs: notes keyed by guid, cards with decks
+    and suspension, and the read and write actions the run uses."""
+
+    def __init__(self):
+        self.notes, self.next_id, self.calls = {}, 1, []
+        self.Refused = anki.Refused  # the daily run loads its own copies of anki.py
+
+    def cards(self):
+        return [(g, n, c) for g, n in self.notes.items() for c in n['cards']]
+
+    def call(self, action, **params):
+        self.calls.append((action, params))
+        if action == 'studiousVersion':
+            return dict(profile='Max')
+        if action == 'deckNames':
+            return sorted({c['deck'] for _, _, c in self.cards()} | {d.rsplit('::', 1)[0] for _, _, c in self.cards()
+                                                                     for d in [c['deck']]})
+        if action == 'studiousObserve':
+            root = params['root']
+            cards = [dict(cardId=c['id'], noteId=c['id'], guid=g, deck=c['deck'], type=0, queue=-1 if c['suspended'] else 0,
+                          due=c['id'], reps=0, lapses=0, flag=0, suspended=c['suspended'], tags=n['tags'], retrievability=None)
+                     for g, n, c in self.cards() if c['deck'] == root or c['deck'].startswith(root + '::')]
+            if not cards:
+                raise self.Refused(f'deck {root} does not exist')
+            return dict(root=root, today=1000, dayCutoff=0, cards=cards, revlog=[], counts=dict(new=0, learning=0, review=0),
+                        preset=dict(name='studious', newPerDay=5, reviewsPerDay=9999))
+        if action == 'studiousNotes':
+            return [dict(guid=g, fields=self.notes[g]['fields'], tags=self.notes[g]['tags']) for g in params['guids']
+                    if g in self.notes]
+        if action == 'studiousUpsertNotes':
+            out = []
+            for n in params['notes']:
+                if n['guid'] in self.notes:
+                    self.notes[n['guid']].update(fields=n['fields'], tags=n['tags'])
+                    out.append(dict(guid=n['guid'], action='updated'))
+                else:
+                    self.notes[n['guid']] = dict(fields=n['fields'], tags=n['tags'],
+                                                 cards=[dict(id=self.next_id, deck=n['deck'], suspended=False)])
+                    self.next_id += 1
+                    out.append(dict(guid=n['guid'], action='created'))
+            return out
+        if action == 'studiousSuspend':
+            for _, _, c in self.cards():
+                if c['id'] in params['cardIds']:
+                    c['suspended'] = params['suspended']
+            return dict(cards=len(params['cardIds']), suspended=params['suspended'])
+        if action == 'studiousForecast':
+            raise self.Refused('patch older than v8')
+        if action == 'studiousApplySettings':
+            return dict(changes=[])
+        if action == 'studiousOptimize':
+            return dict(ran=False)
+        return {}
+
+    def suspended(self, guid):
+        return [c['suspended'] for c in self.notes[guid]['cards']]
+
+
+CARD = """> [!card]- {title}
+> %% id: {guid} · type: Basic+ %%
+> #### Front
+> {title}?
+> #### Back
+> Because.
+> #### Source
+> slide {n}
+"""
+
+
+def grouped_lesson(name, deck, *cards):
+    return (f'---\ncourse: CS3214\ndeck: {deck}\ngoals: [Test2]\nverified: true\ndone: true\n---\n# {name}\n\n'
+            + '\n'.join(CARD.format(title=t, guid=g, n=i) for i, (t, g) in enumerate(cards)))
+
+
+def daily_run(daily, vault, fake, monkeypatch, capsys):
+    fake.Refused = daily.snapshot.anki.Refused
+    monkeypatch.setattr(daily.anki.Anki, 'call', lambda self, action, **p: fake.call(action, **p))
+    monkeypatch.setattr(daily.snapshot.anki.Anki, 'call', lambda self, action, **p: fake.call(action, **p))
+    code = daily.main(['--vault', str(vault), '--no-calendar'])
+    summary = json.loads(capsys.readouterr().out)
+    assert code == 0, summary['errors']
+    return (vault / 'studious/inbox.md').read_text()
+
+
+def test_daily_suspends_a_removed_card_and_restores_it(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'cache'))
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
+    dspec = importlib.util.spec_from_file_location('daily', SCRIPTS / 'daily.py')
+    daily = importlib.util.module_from_spec(dspec)
+    dspec.loader.exec_module(daily)
+    vault = tmp_path / 'vault'
+    (vault / 'studious').mkdir(parents=True)
+    (vault / 'studious/config.md').write_text('---\nanki_profile: Max\ncourses:\n  CS3214:\n    group: Fall-2026\n---\n')
+    lessons = vault / 'courses/Fall-2026/CS3214/lessons'
+    lessons.mkdir(parents=True)
+    a, b, c = 'cs3214_aaaaaaaaaaaa', 'cs3214_bbbbbbbbbbbb', 'cs3214_cccccccccccc'
+    first, second = lessons / '01-locks.md', lessons / '02-condvars.md'
+    first.write_text(grouped_lesson('Locks', 'L01_Locks', ('Why <b>lock</b>', a), ('Spin or block', b)))
+    second.write_text(grouped_lesson('Condvars', 'L02_CondVars', ('Why recheck', c)))
+    fake = FakeCollection()
+    assert 'Suspended' not in daily_run(daily, vault, fake, monkeypatch, capsys)
+    assert fake.notes[a]['cards'][0]['deck'] == 'Fall-2026::CS3214::L01_Locks'
+
+    # a dropped from the vault, b moved to the other lesson, c untouched
+    first.write_text(grouped_lesson('Locks', 'L01_Locks'))
+    second.write_text(grouped_lesson('Condvars', 'L02_CondVars', ('Why recheck', c), ('Spin or block', b)))
+    inbox = daily_run(daily, vault, fake, monkeypatch, capsys)
+    assert fake.suspended(a) == [True] and fake.suspended(b) == [False] and fake.suspended(c) == [False]
+    assert '## Suspended (card block gone)' in inbox
+    assert f'- CS3214: `{a}` "Why lock?" in Fall-2026::CS3214::L01_Locks' in inbox and b not in inbox
+    assert json.loads((vault / 'studious/orphaned.json').read_text()) == {a: dict(course='CS3214', cardIds=[1])}
+
+    # the next run leaves it suspended and says nothing more
+    assert 'Suspended' not in daily_run(daily, vault, fake, monkeypatch, capsys) and fake.suspended(a) == [True]
+
+    # the block comes back unchanged: the daily run unsuspends it
+    first.write_text(grouped_lesson('Locks', 'L01_Locks', ('Why <b>lock</b>', a)))
+    daily_run(daily, vault, fake, monkeypatch, capsys)
+    assert fake.suspended(a) == [False] and json.loads((vault / 'studious/orphaned.json').read_text()) == {}
+
+
+def test_push_unsuspends_a_restored_card(tmp_path):
+    path = write_lesson(tmp_path, LESSON.replace('done: false', 'done: true'))
+    fake = FakeCollection()
+    anki.push(fake, str(tmp_path), [str(path)])
+    gone = 'cs3214_aaaaaaaaaaaa'
+    fake.call('studiousSuspend', cardIds=[c['id'] for c in fake.notes[gone]['cards']], suspended=True)
+    (tmp_path / 'studious/orphaned.json').write_text(json.dumps({gone: dict(course='CS3214', cardIds=[2])}))
+    report = anki.push(fake, str(tmp_path), [str(path)])
+    assert report[0]['restored'] == 1 and fake.suspended(gone) == [False]
+    assert json.loads((tmp_path / 'studious/orphaned.json').read_text()) == {}
+
+
+def test_vault_guids_finds_blocks_anywhere_but_dot_folders(tmp_path):
+    (tmp_path / 'misplaced.md').write_text(CARD.format(title='x', guid='cs3214_aaaaaaaaaaaa', n=1))
+    (tmp_path / '.trash').mkdir()
+    (tmp_path / '.trash/old.md').write_text(CARD.format(title='y', guid='cs3214_bbbbbbbbbbbb', n=1))
+    assert anki.vault_guids(tmp_path) == {'cs3214_aaaaaaaaaaaa'}

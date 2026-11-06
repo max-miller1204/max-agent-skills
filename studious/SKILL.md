@@ -23,7 +23,8 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
 ## Daily mode
 
 1. `uv run scripts/daily.py`. It syncs Anki, pushes cards of lessons the user finished, applies the
-   Anki settings from the config, sets each course's new cards per day, optimizes FSRS monthly, builds cram decks, regenerates timetables, writes the calendar
+   Anki settings from the config, sets each course's new cards per day, suspends notes whose card block left the vault (and unsuspends
+   them when it's back), optimizes FSRS monthly, builds cram decks, regenerates timetables, writes the calendar
    events and the inbox, commits the vault, and logs the run to `~/.local/state/studious/`.
 2. Reply with one short paragraph: today's event title, anything in `errors` or `notes`, and the
    number of inbox items. Don't fix problems yourself in this mode; they're in the inbox for the
@@ -71,7 +72,8 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
 5. Verify: references/verify.md (a fresh sub-agent if you can). It sets `verified: true`.
 6. `uv run scripts/manifest.py accept COURSE <files> --lesson <lesson path>`; `ignore` for files
    deliberately skipped. Changed files: re-read, update the lesson, re-verify; the next daily run
-   pushes the edited cards that are already in Anki.
+   pushes the edited cards that are already in Anki and suspends the notes of blocks you removed.
+   Keep a block's `%% id %%` line when you edit or move it, or its note is suspended and a new one made.
 7. Cards reach Anki when the user ticks `done` on the lesson (the daily run pushes them), or right
    away in cram mode (`uv run scripts/anki.py push --ungated <lesson>`).
 
@@ -106,7 +108,10 @@ never creates a calendar event; the daily quota events are the only ones studiou
 For each: decide whether the card is wrong, ambiguous, overloaded (split it), or fine and the gap is
 the user's (point them to the lesson section). Fix the block in the lesson, re-verify that card
 against the source, push the lesson (updates keep review history), then clear the flag with
-`anki.py set-flag 0 CARD_ID`. Note what changed in `studious/reports/`.
+`anki.py set-flag 0 CARD_ID`. Note what changed in `studious/reports/`. When a split or merge
+removes a block, its note is suspended by the next daily run (references/cards.md, Removing a
+card); a flagged card shown with `orphaned: true` has no block left, so there is nothing to fix:
+clear its flag.
 
 ## Rules
 
@@ -129,6 +134,7 @@ studious/reports/       verification and flag-fix reports       timetable/<COURS
 studious/calendar.json  managed calendar events                 attachments/
 studious/retired.json   cards suspended for retired courses
 studious/pushed.json    each card's fingerprint at its last push
+studious/orphaned.json  cards suspended because their block left the vault
 Dashboard.base          lesson and goal views (Obsidian Bases)
 ```
 
