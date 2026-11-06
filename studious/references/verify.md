@@ -30,6 +30,8 @@ Feynman check, read as a newcomer would (each problem is a **fix**):
 - A term used before the lesson explains it, including in the TL;DR, an opener or a checkpoint.
 - A section whose first paragraph isn't plain words, or plain words that replace the precise
   version instead of leading into it.
+- A precise part that retells its opener (the same idea said twice in a row) instead of picking up
+  where it stopped.
 - A skipped step: a "so" or "therefore" that doesn't follow from what came before.
 - A word standing in for a reason ("basically", "simply", "just", "obviously", "it turns out").
 - An `[!analogy]` with no "Where it breaks:" line, or one that contradicts the sources.
