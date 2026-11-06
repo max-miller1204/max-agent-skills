@@ -40,8 +40,9 @@ precise version, never instead of it.
 1. `# Title`, then a `> [!tldr]` callout: the 3 to 5 ideas that matter, in plain words (see Plain
    words first).
 2. A builds-on line right under it, naming the earlier lessons this one rests on and what it takes
-   from each: `*Builds on: [[06-locking]] (mutexes, critical sections).*` Leave it out of a course's
-   first lesson.
+   from each: `*Builds on: [[06-locking]] (mutexes, critical sections).*` Leave it out when no
+   earlier lesson in the vault is a prerequisite (a course's first lesson, or a topic that rests
+   only on material the vault has no lesson for).
 3. A breakdown map: the one question the lecture answers, then the questions its sections answer,
    each linking to its section. A sub-question nests under its parent when a section has parts.
    ```
@@ -58,9 +59,10 @@ precise version, never instead of it.
      **`pthread_cond_wait`** does.");
    - the precise version: the principle and the mechanism in the course's exact terms, definitions,
      notation and code. Every term, definition, fact, equation and code example the sources teach
-     belongs in the section, here or already stated in the opener. It picks up where the opener stops instead of retelling it: give the course's
-     name for what the opener described and go straight to what the opener left out (the exact
-     definition, the steps, the conditions, the code);
+     belongs in the section, here or already stated in the opener. It picks up where the opener
+     stops instead of retelling it: give the course's name for what the opener described and go
+     straight to what the opener left out (the exact definition, the steps, the conditions, the
+     code);
    - at least one concrete example, traced step by step (a worked example, an interleaving, a
      derivation, a run of the code);
    - a `> [!analogy]` callout, only when a good analogy exists (never forced). It needs no source,
@@ -75,7 +77,9 @@ precise version, never instead of it.
      ```
    - a visual wherever it carries the idea better than prose (see below);
    - a `> [!warning]` for the mistake people actually make here, when there is one;
-   - exactly one folded checkpoint **after** the teaching. By default it asks you to explain the
+   - a source line: `*Source: conditionvariables.pdf slides 8-9.*`
+   - last, exactly one folded checkpoint, after the teaching and its source line, so the section
+     ends on it. By default it asks you to explain the
      idea to a newcomer, out loud or in your head, before unfolding. The answer holds a short
      plain-words explanation and a checklist to grade yourself against:
      ```
@@ -91,7 +95,6 @@ precise version, never instead of it.
      A section that teaches a procedure (trace an interleaving, compute a split, apply an
      algorithm) gets a `> [!question]- Try: …` checkpoint instead, a small problem with its worked
      answer. Short recall questions belong in the cards, not here.
-   - a source line: `*Source: conditionvariables.pdf slides 8-9.*`
 5. `## Practice`: fresh problems that need the ideas, not the wording. There's no quota, but each
    problem has to earn its slot: it practices something no other problem, checkpoint or card
    already drills (a different idea, or a different kind of task on it). Together they cover every

@@ -50,6 +50,9 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
      (never delete a course's deck: the next run would push its cards again);
    - "change my Anki settings" → edit `anki_settings` in the config, then `anki.py settings apply`
      (references/onboarding.md, Anki settings);
+   - "rewrite these lessons with fresh cards" or "delete these cards for good" → collect the old
+     guids, rewrite, then `anki.py delete-notes` with the user's OK on its dry run
+     (references/cards.md, Deleting notes for good);
    - nothing → ingest what's new (bounded), then the daily steps.
 4. **Deadlines.** `uv run scripts/calendar_events.py deadlines` lists exam-like events in the next
    120 days that have no goal yet. Ask whether to adopt each (tentative ones can wait); adopting
@@ -116,7 +119,8 @@ clear its flag.
 ## Rules
 
 - Never write to Anki except through `anki.py` and the patched AnkiConnect; never choose a full
-  sync direction; never invent reviews.
+  sync direction; never invent reviews. Delete notes only with `anki.py delete-notes`, after the
+  user has seen its dry run and said yes.
 - The only calendar writes are `daily.py`'s all-day `[studious]` events in the configured
   calendar. Events the user edited or deleted are left alone.
 - Every claim and card cites its source. Unsupported material is dropped or marked supplementary.

@@ -712,3 +712,41 @@ def test_push_leaves_a_restored_card_of_a_retired_course_suspended(tmp_path):
     (tmp_path / 'studious/orphaned.json').write_text(json.dumps({gone: dict(course='CS2505', cardIds=[2])}))
     report = anki.push(fake, str(tmp_path), [str(path)])
     assert 'restored' not in report[0] and fake.suspended(gone) == [True]
+
+
+class DeletingAnki:
+    """studiousNotes and deleteNotes against in-memory notes keyed by guid."""
+
+    def __init__(self, notes):
+        self.notes = dict(notes)  # guid -> noteId
+        self.deleted = []
+
+    def call(self, action, **params):
+        if action == 'studiousNotes':
+            return [dict(guid=g, noteId=self.notes[g], cards=[dict(reps=2)]) for g in params['guids'] if g in self.notes]
+        assert action == 'deleteNotes'
+        self.deleted += params['notes']
+        self.notes = {g: i for g, i in self.notes.items() if i not in params['notes']}
+
+
+def test_delete_notes_deletes_and_cleans_the_records(tmp_path):
+    write_lesson(tmp_path, LESSON)  # still holds cs3214_aaaaaaaaaaaa
+    (tmp_path / 'studious').mkdir()
+    (tmp_path / 'studious/pushed.json').write_text(json.dumps({'cs3214_bbbbbbbbbbbb': 'h1', 'cs3214_aaaaaaaaaaaa': 'h2'}))
+    (tmp_path / 'studious/orphaned.json').write_text(json.dumps({'cs3214_bbbbbbbbbbbb': {'course': 'CS3214', 'cardIds': [7]}}))
+    fake = DeletingAnki({'cs3214_bbbbbbbbbbbb': 11})
+    dry = anki.delete_notes(fake, str(tmp_path), ['cs3214_bbbbbbbbbbbb', 'cs3214_cccccccccccc'], dry_run=True)
+    assert dry['notes'] == 1 and dry['reviews'] == 2 and dry['missing'] == ['cs3214_cccccccccccc'] and not fake.deleted
+    out = anki.delete_notes(fake, str(tmp_path), ['cs3214_bbbbbbbbbbbb', 'cs3214_cccccccccccc'])
+    assert fake.deleted == [11] and out['notes'] == 1
+    assert json.loads((tmp_path / 'studious/pushed.json').read_text()) == {'cs3214_aaaaaaaaaaaa': 'h2'}
+    assert json.loads((tmp_path / 'studious/orphaned.json').read_text()) == {}
+
+
+def test_delete_notes_refuses_a_guid_still_in_the_vault_or_not_studious(tmp_path):
+    write_lesson(tmp_path, LESSON)
+    fake = DeletingAnki({'cs3214_aaaaaaaaaaaa': 1, 'handmade-guid': 2})
+    for guids in (['cs3214_aaaaaaaaaaaa'], ['handmade-guid']):
+        with pytest.raises(anki.Refused):
+            anki.delete_notes(fake, str(tmp_path), guids)
+    assert not fake.deleted

@@ -90,6 +90,22 @@ suspended. A card moved to another lesson, or another course, keeps its id and i
 move a block with its `%% id %%` line, never retype it. To bring a note back, put its block (with
 the same id) in a verified lesson: the next push or daily run unsuspends exactly the recorded cards,
 wherever they sit now, leaving any suspended by hand (and any in a retired course's deck).
-`daily.py --dry-run` lists what it would suspend. Deleting the note in Anki is the user's call, by hand, for a card
-gone for good. A course whose lessons are all missing is held with a warning instead (a folder lost
-in a sync); retire it to suspend its cards on purpose.
+`daily.py --dry-run` lists what it would suspend. A course whose lessons are all missing is held
+with a warning instead (a folder lost in a sync); retire it to suspend its cards on purpose.
+
+## Deleting notes for good
+
+Suspending keeps a removed card's history in case the block comes back. When the user wants notes
+gone for good (a card dropped for good, or a clean-slate rewrite where a lesson's cards are all
+replaced by new ones), delete them with `anki.py delete-notes`, never by hand through `call`:
+
+1. Collect the guids before the old blocks are lost, for a rewrite from the committed version:
+   `git -C <vault> show HEAD:<lesson path> | grep -oE 'id: [a-z0-9]+_[0-9a-f]{12}' | cut -c5- > old.txt`.
+2. `uv run scripts/anki.py delete-notes --file old.txt --dry-run` shows how many notes, cards and
+   reviews would go, and which guids Anki doesn't have. Show the user that and get their OK on it.
+3. Rerun without `--dry-run`. It deletes the notes and drops their guids from `studious/pushed.json`
+   and `studious/orphaned.json`.
+
+It refuses, changing nothing, any guid a card block in the vault still has (the next push would
+create it again as new) and any note studious didn't make (those are the user's to delete in Anki).
+Then push the lessons whose new blocks replace them, or let the daily run do it once they're done.

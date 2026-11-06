@@ -32,6 +32,9 @@ Commands (all print JSON):
   reposition CARD_ID...       put these new cards first, in order
   set-flag FLAG CARD_ID...    0 clears
   suspend CARD_ID... | unsuspend CARD_ID...
+  delete-notes [GUID...] [--file F] [--dry-run]
+                              delete studious notes for good (only with the user's OK on the dry-run
+                              list); refuses guids still in a card block or not made by studious
   cram NAME --search QUERY [--limit N]   |   cram-delete NAME
   sync                        normal AnkiWeb sync; refuses when a full sync is needed
   call ACTION [JSON_PARAMS]   any AnkiConnect action (profile added for studious* actions)
@@ -53,6 +56,7 @@ note. It creates a card in Anki only when the lesson has `verified: true` and `d
 
 A note whose block is gone from every lesson is suspended by the daily run (plan.py, recorded in
 `studious/orphaned.json`); when `push` sends its guid again, it unsuspends the cards it suspended.
+`delete-notes` deletes such notes for good instead, when the user asks for it.
 """
 import argparse
 import base64
@@ -638,6 +642,42 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
     return report
 
 
+def delete_notes(anki, vault, guids, dry_run=False):
+    """Delete studious notes from Anki for good, by guid, and drop them from the vault's records.
+
+    For a card block removed on purpose and not coming back (a clean-slate rewrite, a card dropped for
+    good): the daily run only suspends such notes. Refuses, before touching anything, a guid that a card
+    block in the vault still has (deleting it would make the next push create it again as new) or that
+    studious didn't make. Guids Anki doesn't have are reported as missing. The caller shows the user
+    the `--dry-run` list and deletes only with their OK: review history is gone with the note."""
+    guids = list(dict.fromkeys(guids))
+    pushed_path, pushed = vault_record(vault, 'pushed')
+    orphans_path, orphans = vault_record(vault, 'orphaned')
+    in_vault = sorted(set(guids) & vault_guids(vault))
+    foreign = sorted(g for g in guids if not studious_owned(g, pushed))
+    if in_vault or foreign:
+        raise Refused('not deleted, nothing changed: '
+                      + '; '.join(filter(None, [
+                          in_vault and f'{len(in_vault)} still in a card block of the vault ({", ".join(in_vault[:5])}'
+                                       f'{", ..." if len(in_vault) > 5 else ""}): remove the block first',
+                          foreign and f'{len(foreign)} not made by studious ({", ".join(foreign[:5])}'
+                                      f'{", ..." if len(foreign) > 5 else ""}): delete those in Anki by hand'])))
+    notes = anki.call('studiousNotes', guids=guids) if guids else []
+    found = {n['guid'] for n in notes}
+    out = dict(notes=len(notes), cards=sum(len(n.get('cards') or []) for n in notes),
+               reviews=sum(c.get('reps') or 0 for n in notes for c in n.get('cards') or []),
+               missing=[g for g in guids if g not in found], dryRun=dry_run)
+    if dry_run:
+        out['guids'] = sorted(found)
+        return out
+    if notes:
+        anki.call('deleteNotes', notes=[n['noteId'] for n in notes])
+    gone = set(guids)  # missing ones too: Anki doesn't have them either way
+    write_record(pushed_path, {g: h for g, h in pushed.items() if g not in gone})
+    write_record(orphans_path, {g: e for g, e in orphans.items() if g not in gone})
+    return out
+
+
 def find_card(vault, guid):
     for path in vault_notes(vault):  # where orphan detection looks, so the two agree
         text = path.read_text(encoding='utf-8')
@@ -692,6 +732,10 @@ def main(argv=None):
     p.add_argument('cards', nargs='+', type=int)
     for name in ('suspend', 'unsuspend'):
         sub.add_parser(name).add_argument('cards', nargs='+', type=int)
+    p = sub.add_parser('delete-notes')
+    p.add_argument('guids', nargs='*')
+    p.add_argument('--file', help='a file with one guid per line (or any whitespace)')
+    p.add_argument('--dry-run', action='store_true')
     p = sub.add_parser('cram')
     p.add_argument('name')
     p.add_argument('--search', required=True)
@@ -772,6 +816,9 @@ def main(argv=None):
             out = anki.call('studiousSetFlag', cardIds=args.cards, flag=args.flag)
         elif args.cmd in ('suspend', 'unsuspend'):
             out = anki.call('studiousSuspend', cardIds=args.cards, suspended=args.cmd == 'suspend')
+        elif args.cmd == 'delete-notes':
+            guids = args.guids + (Path(args.file).read_text(encoding='utf-8').split() if args.file else [])
+            out = delete_notes(anki, args.vault, guids, args.dry_run)
         elif args.cmd == 'cram':
             out = anki.call('studiousCram', name=args.name, search=args.search, limit=args.limit)
         elif args.cmd == 'cram-delete':
