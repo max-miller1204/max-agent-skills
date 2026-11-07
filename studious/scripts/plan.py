@@ -16,23 +16,27 @@ Rules (Anki and FSRS guidance on workload, plus lesson pacing):
   before it instead of piling up at the end. Deadline goals go first, nearest first; then each
   course's casual or budget floor fills the room left under the cap.
 - Overdue reviews above the backlog threshold -> no new cards today for that course, unless one of
-  its goals is within `cram_days`.
+  its goals is within `prep_days`.
 - Deadline goals: every card in scope is shown by the day before the deadline, and by two days
   before when they fit, so each comes back at least once before the exam. If they fit under
   the cap they stay under it; if they don't, the goal is in cram mode and they go in anyway, on the
   least busy days, with a warning that names the busiest day. On the day before, the limit is also
   set as "today only", so it lapses if the next run doesn't happen. On the exam day the goal is over
   for pacing: the course gets no casual cards (they'd be that exam's), only its other goals' cards;
-  a goal in cram mode keeps its cram deck that day. Overlapping goals of one course count the union
+  its prep deck stays that day. Overlapping goals of one course count the union
   of their scopes, nearest deadline first. Cards of unverified lessons can't be shown, so they're
   left out (the inbox asks for the verification).
 - Lessons are paced to be done `lesson_buffer_days` before the deadline, at most
   `max_lessons_per_day` across all goals, nearest deadline first. A goal whose lessons or cards don't
   fit switches to cram mode: lessons may run until the day before (all of them scheduled, over the
   per-day cap if need be, with a warning), cards are pushed without waiting
-  for lessons, and for the last `cram_days` a filtered deck of its weakest cards is built. A goal
-  that leaves cram mode, or is archived or done, loses its cram deck. A lesson's cards can be shown
-  from the day after it's read (or right away when pushed ungated).
+  for lessons, and its prep deck also takes its unseen cards. A lesson's cards can be shown from the
+  day after it's read (or right away when pushed ungated).
+- Prep decks: every deadline goal gets `<root>::<goal> prep` for its last `prep_days` (through the
+  exam day): the in-scope reviewed cards whose recall on exam day, projected on the FSRS forgetting
+  curve from today's retrievability and stability, is below `exam_recall_target`, weakest first.
+  In cram mode a second filter adds the goal's unseen cards in queue order. A goal that's archived,
+  done or past loses its deck, and the `<goal> cram` decks of earlier versions are deleted.
 - Only verified lessons are scheduled to read; unverified ones wait in the inbox.
 - A lesson whose cards in Anki are out of date is pushed again: a card block edited since its last
   push (state `pushed`), or exam tags that differ from its `goals` (a goal carried or dropped).
@@ -46,6 +50,10 @@ Rules (Anki and FSRS guidance on workload, plus lesson pacing):
   merge, a rewrite) is suspended and recorded (state `orphaned`); a card moved to another lesson or
   course is not one. When its guid is back in a verified lesson, the recorded cards are unsuspended.
   A course with such notes but no lesson at all is held with a warning instead (see `orphans`).
+- Inbox: new or changed source files per course (course material and exam blueprints only), goals
+  with no material yet, courses with unseen cards and no upcoming goal, past goals with cards never
+  shown, lessons on the reading list for 2 or more days (state `reading`, the first day each was on
+  the day's list), leeches; and a warning when the last 7 days averaged under half of `cards_per_day`.
 - The calendar's later days come from the same placement: each day's new cards and the reviews
   expected that day, assuming each day's reviews get done.
 """
@@ -54,6 +62,7 @@ import datetime
 import json
 import math
 import sys
+from zoneinfo import ZoneInfo
 
 WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
@@ -71,8 +80,13 @@ def root_deck(goal, courses):
     return (courses.get(goal['course']) or {}).get('root') or goal['course']
 
 
+def prep_name(goal, courses):
+    """Inside the course deck, so studying the course includes the prep cards."""
+    return f"{root_deck(goal, courses)}::{goal['id']} prep"
+
+
 def cram_name(goal, courses):
-    """Inside the course deck, so studying the course includes the cram cards."""
+    """The filtered deck of earlier versions (and of a patch older than v11): deleted when found."""
     return f"{root_deck(goal, courses)}::{goal['id']} cram"
 
 
@@ -88,6 +102,9 @@ def plural(n, word):
 INDENT = '\u00a0' * 4  # calendar sub-bullets
 SPAN = 14  # days after a card is shown whose load decides where it goes (most of its early reviews)
 OBSOLETE_KEYS = ('anki_minutes_per_day', 'seconds_per_review', 'reviews_per_new_card')
+DEFAULT_DECAY = 0.1542  # FSRS-6's default decay; patch v11's forecast sends the preset's own
+LATE_DAYS = 2  # a lesson on the reading list this many days without being read goes in the inbox
+ORDER_RETRIEVABILITY, ORDER_DUE = 8, 6  # Anki's filtered-deck orders
 
 # Reviews j days after a new card is first shown, from Anki's FSRS simulator with the default FSRS
 # parameters, 90% retention and one learning and one relearning step (20,000 simulated cards). Used
@@ -100,6 +117,64 @@ DEFAULT_PER_NEW_CARD = [
     0.043, 0.044, 0.043, 0.042, 0.042, 0.041, 0.039, 0.04, 0.039, 0.038, 0.039, 0.037, 0.037, 0.036, 0.035,
     0.035, 0.034, 0.035, 0.034, 0.033, 0.034, 0.032, 0.032, 0.03, 0.032, 0.031, 0.031, 0.031, 0.031, 0.03,
 ]
+
+
+def recall_after(r, s, days, decay=DEFAULT_DECAY):
+    """FSRS forgetting curve, R(t) = (1 + factor * t / S) ** -decay with R(S) = 0.9: the recall `days`
+    from now of a card whose recall today is r and stability s (days). None without a memory state."""
+    if r is None or not s or s <= 0 or not 0 < r <= 1 or not decay or decay <= 0:
+        return None
+    factor = 0.9 ** (-1 / decay) - 1
+    elapsed = s / factor * (r ** (-1 / decay) - 1)
+    return (1 + factor * (elapsed + days) / s) ** -decay
+
+
+def folder_list(names, more):
+    """'a', 'a and b', 'a, b and c', or 'a, b, c and 2 more folders'."""
+    if more:
+        return ', '.join(names) + f" and {plural(more, 'more folder')}"
+    return names[0] if len(names) == 1 else ', '.join(names[:-1]) + f' and {names[-1]}'
+
+
+def source_lines(sources):
+    """Inbox lines for new or changed source files: up to 3 folders each, exam blueprints first."""
+    out = []
+    for code in sorted(sources):
+        s = sources[code]
+        bases = sorted(s.get('base') or [], key=len, reverse=True)
+
+        def shown(folder):
+            for b in bases:
+                if folder == b:
+                    return b.rsplit('/', 1)[-1]
+                if folder.startswith(b + '/'):
+                    return folder[len(b) + 1:]
+            return folder
+        folders = sorted((s.get('new') or {}).items(),
+                         key=lambda kv: (not kv[1].get('exam-blueprint'), -sum(kv[1].values()), kv[0]))
+        names = [shown(f) for f, _ in folders[:3]]
+        changed = int(s.get('changed') or 0)
+        if names:
+            more = f", and {plural(changed, 'changed file')}" if changed else ''
+            out.append(f"{code}: new material in {folder_list(names, len(folders) - 3 if len(folders) > 3 else 0)}"
+                       f"{more}: ingest it?")
+        elif changed:
+            out.append(f"{code}: {plural(changed, 'changed source file')}: update their lessons?")
+    return out
+
+
+def review_days(courses, retired, tz):
+    """Distinct cards reviewed per Anki day (rolling over at 4am), from every course's review log."""
+    per_day = {}
+    for code, course in courses.items():
+        if code in retired:
+            continue
+        for r in course.get('revlog') or []:
+            if r.get('kind') in (4, 5) or r.get('ease') == 0:  # manual reschedules aren't reviews
+                continue
+            d = (datetime.datetime.fromtimestamp(r['id'] / 1000, tz) - datetime.timedelta(hours=4)).date()
+            per_day.setdefault(d, set()).add(r['cardId'])
+    return per_day
 
 
 class Load:
@@ -227,10 +302,20 @@ def plan(state):
     lessons = sorted((l for l in state.get('lessons') or [] if l['course'] not in retired),
                      key=lambda l: (l['course'], l['order'], l['path']))
     warnings, inbox = list(state.get('warnings') or []) + orphaned['warnings'], []
+    config_set = set(state.get('config_set') or [])
     for key in OBSOLETE_KEYS:
-        if key in (state.get('config_set') or []):
+        if key in config_set:
             warnings.append(f"studious/config.md sets {key}, which is no longer used: the daily budget is "
                             f"cards_per_day (new cards plus reviews). Remove it.")
+    if 'cram_days' in config_set and 'prep_days' not in config_set:
+        prep_days = int(cfg['cram_days'])
+        warnings.append("studious/config.md sets cram_days, which is now prep_days (the days a goal's prep "
+                        "deck covers): rename it.")
+    else:
+        if 'cram_days' in config_set:
+            warnings.append("studious/config.md sets both cram_days and prep_days: cram_days is ignored. Remove it.")
+        prep_days = int(cfg.get('prep_days', cfg.get('cram_days', 2)))
+    target = float(cfg.get('exam_recall_target', 0.90))
 
     anki_guids = {code: {c['guid'] for c in course.get('cards') or []} for code, course in courses.items()}
 
@@ -260,31 +345,36 @@ def plan(state):
 
     # ---- goals ---------------------------------------------------------------------------------
     goals_out, active = [], []
-    cram_delete = []
+    # Every goal's old cram deck goes, and every prep deck that isn't built this run (archived, done,
+    # past or retired goals, and goals outside their prep days).
+    deck_delete = set()
     for g in sorted(state.get('goals') or [], key=lambda g: (g.get('date') or '9999', g['course'], g['id'])):
-        if g.get('status', 'active') != 'active':
-            cram_delete.append(cram_name(g, courses))  # archived or done, maybe before the run after its exam
-            continue
-        if g['course'] in retired:
-            cram_delete.append(cram_name(g, courses))
+        deck_delete |= {cram_name(g, courses), prep_name(g, courses)}
+        if g.get('status', 'active') != 'active' or g['course'] in retired:
             continue
         days_left = (day(g['date']) - today).days if g.get('date') else None
-        if days_left is not None and days_left < 0:
-            inbox.append(f"{g['title']} was on {g['date']}: archive it, or carry its unread lessons into a later goal?")
-            cram_delete.append(cram_name(g, courses))
-            continue
         scope_lessons = [l for l in lessons if l['course'] == g['course'] and g['id'] in l['goals']]
         cards = courses.get(g['course'], {}).get('cards') or []
         scope_new = [c for c in cards if c['type'] == 0 and not c['suspended'] and in_scope(c, g)]
         unseen = len(scope_new) + sum(unpushed(l) for l in scope_lessons)
+        if days_left is not None and days_left < 0:
+            if unseen:
+                inbox.append(f"{g['title']} was on {g['date']}, {plural(unseen, 'card')} never shown: carry its "
+                             f"lessons into a later goal, or archive it?")
+            else:
+                inbox.append(f"{g['title']} was on {g['date']}: archive it, or carry its unread lessons into a later goal?")
+            continue
         remaining = [l for l in scope_lessons if not l['done']]
         entry = dict(id=g['id'], course=g['course'], title=g['title'], mode=g.get('mode', 'deadline'),
                      date=g.get('date'), days_left=days_left, unseen=unseen, scope_new=[c['cardId'] for c in scope_new],
                      lessons_left=[l['path'] for l in remaining], cram=bool(g.get('cram')), required_new_per_day=0,
                      lessons_per_week=g.get('lessons_per_week'))
-        if not scope_lessons and not scope_new:
-            if days_left is not None and days_left <= 21:
-                inbox.append(f"{g['title']} is in {plural(days_left, 'day')} and has no material yet: ingest its notes.")
+        if not scope_lessons and not any(in_scope(c, g) for c in cards):  # as soon as the goal exists
+            if days_left is None:
+                inbox.append(f"{g['title']} has no material yet: ingest its notes.")
+            else:
+                when = 'today' if days_left == 0 else f"in {plural(days_left, 'day')}"
+                inbox.append(f"{g['title']} is {when} and has no material yet: ingest its notes.")
             entry['empty'] = True
         goals_out.append(entry)
         if not entry.get('empty'):
@@ -363,7 +453,7 @@ def plan(state):
     for g in deadline_goals:
         nearest[g['course']] = min(nearest.get(g['course'], 10 ** 6), g['days_left'])
     backlog = {code for code in planned_codes if overdue[code] > int(cfg['backlog_overdue_threshold'])
-               and nearest.get(code, 10 ** 6) > int(cfg['cram_days'])}
+               and nearest.get(code, 10 ** 6) > prep_days}
     for code in sorted(backlog):
         warnings.append(f"{code}: {plural(overdue[code], 'overdue review')}; no new cards until they're done.")
 
@@ -584,14 +674,79 @@ def plan(state):
         if not l['verified'] and l['cards']:
             inbox.append(f"{l['title']} isn't verified yet: run the verification pass.")
 
-    deck_goals = [g for g in exam_today + deadline_goals if g['cram']]  # cram deck and calendar line
-    cram = []
-    for g in deck_goals:
-        if g['days_left'] <= int(cfg['cram_days']):
-            cram.append(dict(name=cram_name(g, courses), limit=9999,
-                             search=f'deck:"{root_deck(g, courses)}" tag:{g["course"]}::exam::{g["id"]} prop:r<0.85'))
-    built = {d['name'] for d in cram}  # a goal that left cram mode (caught up, or `cram` unset) loses its deck
-    cram_delete += [cram_name(g, courses) for g in goals_out if cram_name(g, courses) not in built]
+    # ---- prep decks: the last prep_days of every deadline goal, through the exam day -------------------
+    decay = (forecast.get('decay') if from_anki else None) or DEFAULT_DECAY
+    # A patch older than v11 builds the weak cards only (no second filter), as `<goal> cram`.
+    two_filters = state.get('patch') is None or int(state['patch']) >= 11
+    prep, notes, prep_cards = [], [], {}
+    taken = set()  # a card goes to the nearest goal's deck only: a filtered deck can't share it
+    for g in sorted(exam_today + deadline_goals, key=lambda g: (g['days_left'], g['course'], g['id'])):
+        if g['days_left'] > prep_days:
+            continue
+        cards = (courses.get(g['course']) or {}).get('cards') or []
+        weak = []
+        for c in cards:
+            if c['type'] != 2 or c['suspended'] or not in_scope(c, g) or c['cardId'] in taken:
+                continue  # reviewed cards only: new ones have no memory state, learning ones are in progress
+            r = recall_after(c.get('retrievability'), c.get('stability'), g['days_left'], decay)
+            if r is not None and r < target:
+                weak.append((r, c['cardId']))
+        weak.sort()
+        taken |= {i for _, i in weak}
+        unseen = len([i for i in g['scope_new'] if i not in taken]) if g['cram'] and two_filters else 0
+        if unseen:
+            taken |= set(g['scope_new'])
+        name, root = prep_name(g, courses), root_deck(g, courses)
+        new_search = f'deck:"{root}" tag:{g["course"]}::exam::{g["id"]} is:new -is:suspended'
+        if not weak and not unseen:
+            notes.append(f"{g['course']} {g['id']} prep: nothing below {target:.2f} on exam day"
+                         + (' and no unseen cards.' if g['cram'] else '.'))
+            continue
+        if weak:
+            deck = dict(name=name, search='cid:' + ','.join(str(i) for _, i in weak), limit=len(weak),
+                        order=ORDER_RETRIEVABILITY)
+            if unseen:
+                deck.update(search2=new_search, limit2=9999, order2=ORDER_DUE)
+        else:
+            deck = dict(name=name, search=new_search, limit=9999, order=ORDER_DUE)
+        prep.append(dict(deck, goal=g['id'], course=g['course'], weak=len(weak), unseen=unseen,
+                         cards=len(weak) + unseen))
+        prep_cards[(g['course'], g['id'])] = len(weak) + unseen
+    deck_delete -= {d['name'] for d in prep}
+
+    # ---- inbox: what needs ingesting, courses with nothing ahead, late lessons, leeches --------------
+    inbox += source_lines(state.get('sources') or {})
+    for code in planned_codes:
+        upcoming = any(g['course'] == code and g.get('status', 'active') == 'active'
+                       and (not g.get('date') or day(g['date']) >= today) for g in state.get('goals') or [])
+        n = new_pool[code] + sum(unpushed(l) for l in lessons if l['course'] == code and l['verified'])
+        if n and not upcoming:
+            inbox.append(f"{code}: {plural(n, 'unseen card')} and no upcoming goal: add one?")
+    scheduled_any = {p for todays in days_lessons for p in todays}
+    reading = {p: first for p, first in (state.get('reading') or {}).items()
+               if p in by_path and not by_path[p]['done'] and p in scheduled_any}
+    for p in days_lessons[0] if days_lessons else []:
+        reading.setdefault(p, today.isoformat())
+    for p, first in sorted(reading.items(), key=lambda kv: (kv[1], kv[0])):
+        since = day(first)
+        if (today - since).days >= LATE_DAYS:
+            inbox.append(f"{by_path[p]['title']} has been on your list since {since.strftime('%b')} {since.day}: "
+                         f"read it, or push it back?")
+    for code in sorted(courses):
+        if code in retired:
+            continue
+        leeches = len({c.get('noteId', c['cardId']) for c in courses[code].get('cards') or []  # a note tag
+                       if not c['suspended'] and any(t.lower() == 'leech' for t in c.get('tags') or [])})
+        if leeches:
+            inbox.append(f"{code}: {leeches} {'leech' if leeches == 1 else 'leeches'} (cards you keep forgetting): fix them?")
+    per_day = review_days(courses, retired, ZoneInfo(cfg.get('timezone') or 'America/New_York'))
+    if per_day:
+        start = max(min(per_day), today - datetime.timedelta(days=7))  # days before the first review don't count
+        n = (today - start).days
+        if n >= 1:
+            avg = sum(len(per_day.get(start + datetime.timedelta(days=i), ())) for i in range(n)) / n
+            if avg < cap / 2:
+                warnings.append(f"Last {plural(n, 'day')}: about {round(avg)} cards a day, against cards_per_day {cap}.")
 
     # ---- the next days: card counts and calendar text ---------------------------------------------
     days = []
@@ -606,10 +761,18 @@ def plan(state):
         # Sub-bullets are indented with no-break spaces: Calendar's description view collapses plain ones.
         lines += ([f"• {'Lesson' if len(todays) == 1 else 'Lessons'}:"] + [f"{INDENT}- {l['title']}" for l in todays]
                   if todays else ['• Lessons: none'])
-        for g in deck_goals:
+        for g in exam_today + deadline_goals:
             left = g['days_left'] - k
-            if left >= 0:
-                lines.append(f"• Cram: {g['course']} {g['id']} ({'today' if left == 0 else plural(left, 'day') + ' left'})")
+            if left < 0:
+                continue
+            when = 'today' if left == 0 else plural(left, 'day') + ' left'
+            if left <= prep_days:
+                if k == 0 and (g['course'], g['id']) not in prep_cards:
+                    continue  # nothing in today's prep deck
+                count = f", {plural(prep_cards[(g['course'], g['id'])], 'card')}" if k == 0 else ''
+                lines.append(f"• Prep: {g['course']} {g['id']}{count} ({when}{', cram mode' if g['cram'] else ''})")
+            elif g['cram']:
+                lines.append(f"• Cram: {g['course']} {g['id']} ({when})")
         if k == 0 and inbox:
             lines.append(f"• Inbox: {plural(len(inbox), 'decision')}")
         days.append(dict(date=date.isoformat(), weekday=WEEKDAYS[date.weekday()], new=new, due=due, cards=cards_total,
@@ -646,7 +809,7 @@ def plan(state):
     return dict(today=today.isoformat(), total_new_per_day=sum(c['new_per_day'] for c in course_out.values()),
                 load=load_info,
                 goals=goals_out, courses=course_out,
-                push=push, cram=cram, cram_delete=sorted(set(cram_delete)), days=days,
+                push=push, prep=prep, prep_delete=sorted(deck_delete), notes=notes, reading=reading, days=days,
                 suspend=suspend, unsuspend=unsuspend, retired=record, inbox=inbox, warnings=warnings,
                 orphans={k: orphaned[k] for k in ('suspend', 'unsuspend', 'new', 'restored')},
                 orphaned=orphaned['record'])

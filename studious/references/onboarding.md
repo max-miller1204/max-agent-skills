@@ -96,7 +96,7 @@ frontmatter. Never invent values the user didn't choose; leave a key out to get 
 2. **Calendar**: `uv run scripts/calendar_events.py calendars`, then pick the Studious calendar
    for `calendar_id`, and the calendars that hold exams and deadlines for `deadline_calendars`.
 3. **Daily budget**: Anki cards per day (new cards plus reviews), most lessons per day,
-   how many days before a deadline lessons should be done, how many days of cram deck.
+   how many days before a deadline lessons should be done, how many days of prep deck before an exam.
 4. **Anki profile**: keep `testing` while trying studious out; switch later (section 6).
 5. **Timezone**, if not America/New_York.
 
@@ -115,10 +115,11 @@ Config keys and defaults:
 | `cards_per_day` | 150 | Anki cards a day for all courses together: new cards plus reviews (the number on the calendar event). The reviews each new card brings come from Anki's FSRS simulator, so new cards are placed where they keep every day under this; a deadline that can't fit goes over it, with a warning naming the busiest day. |
 | `max_lessons_per_day` | 2 | Across all goals. |
 | `lesson_buffer_days` | 3 | Lessons finish this many days before a deadline (cram mode uses the day before). |
-| `cram_days` | 2 | Final days with a cram deck, for goals in cram mode. |
+| `prep_days` | 2 | Final days, through the exam day, with a prep deck (`<root>::<goal> prep`) for every deadline goal: the in-scope cards whose expected recall on exam day is below `exam_recall_target`, weakest first, plus the goal's unseen cards in cram mode. Replaces `cram_days`, still read for now with a warning. |
+| `exam_recall_target` | 0.90 | The prep deck's bar: recall on exam day, projected on the FSRS forgetting curve from each card's recall and stability today. |
 | `casual_new_per_day` | 5 | New cards/day for courses with no deadline pressure, and casual goals. |
 | `budget_new_per_day` | 10 | For self-paced budgeted goals. |
-| `backlog_overdue_threshold` | 0 | More overdue reviews than this: no new cards for that course (unless a deadline is within `cram_days`). |
+| `backlog_overdue_threshold` | 10 | More overdue reviews than this: no new cards for that course today (unless a deadline is within `prep_days`). |
 | `calendar_days` | 7 | Days of events written ahead. |
 | `rag_green`, `rag_amber` | 0.90, 0.75 | Timetable color thresholds. |
 | `obsidian_sync_service` | none | systemd user service the daily run checks first. |
@@ -135,8 +136,9 @@ so a lesson subdeck never gives more than its course allows.
 
 A course marked `done: true` moves to a second preset, `<anki_preset_name>::done` (created the first
 time): the same settings with `done_preset` on top, 85% retention by default, so its reviews thin
-out. Cram stays on filtered decks; retention isn't raised before exams, since workload climbs
-steeply above 90%. Once `fsrs_optimize_days` have passed (Anki keeps the count), the daily run
+out. Exam prep stays on filtered decks; retention isn't raised before exams, since workload climbs
+steeply above 90%. The prep deck brings back only the cards that would be below
+`exam_recall_target` on exam day. Once `fsrs_optimize_days` have passed (Anki keeps the count), the daily run
 runs "Optimize all presets", so FSRS fits your own memory as reviews accumulate.
 
 The defaults follow the Anki manual's FSRS advice: one same-day learning step, 90% retention, and an
@@ -241,7 +243,7 @@ into one or from one group to another:
 3. Rewrite links to the old folders: `[[courses/…/CS3214/…` in `studious/reports/`, `"lesson"` paths
    in `studious/manifests/CS3214.json`, and any links you made yourself to the goal notes.
 4. Run `uv run scripts/daily.py`. Its "move decks" step renames the course's deck (`CS3214` or
-   `<old group>::CS3214`) to the new root, with its lesson and cram decks, keeping every card's review
+   `<old group>::CS3214`) to the new root, with its lesson and prep decks, keeping every card's review
    history (patch v9 or later; with an older patch the run stops there and says so). It also rewrites
    the timetables, and the inbox lists any lesson or goal note still outside the new folders.
 

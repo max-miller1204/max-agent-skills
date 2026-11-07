@@ -24,7 +24,7 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
 
 1. `uv run scripts/daily.py`. It syncs Anki, pushes cards of lessons the user finished, applies the
    Anki settings from the config, sets each course's new cards per day, suspends notes whose card block left the vault (and unsuspends
-   them when it's back), optimizes FSRS monthly, builds cram decks, regenerates timetables, writes the calendar
+   them when it's back), optimizes FSRS monthly, builds each exam's prep deck, regenerates timetables, writes the calendar
    events and the inbox, commits the vault, and logs the run to `~/.local/state/studious/`.
 2. Reply with one short paragraph: today's event title, anything in `errors` or `notes`, and the
    number of inbox items. Don't fix problems yourself in this mode; they're in the inbox for the
@@ -37,9 +37,16 @@ script prints JSON. Paths below are relative to the vault (`~/studious` unless `
 2. **Inbox.** Read `studious/inbox.md` and settle each item with the user:
    - past deadline → archive it (`status: archived` in the goal; its cards stay in Anki), or carry its
      unread lessons into a later goal (add that goal id to their `goals`; the next run retags their
-     cards in Anki), then archive it;
+     cards in Anki), then archive it. When the note says cards were never shown, offer carrying first;
    - unverified lesson → run the verification pass (references/verify.md);
    - goal without material → ingest its sources or drop the goal;
+   - new material in a course's folders → ingest it (Ingest below, bounded, nearest goal first), or
+     `manifest.py ignore` the files that will never be lessons, so the line goes away;
+   - unseen cards and no upcoming goal → add the next goal (adopt it from the calendar if it's there),
+     or mark the course `done: true` if it's over;
+   - a lesson on the list for days → the user reads it and ticks `done`, or pushes it back: reset its
+     date in `studious/reading.json` to today (2 more days), or take the goal id out of its `goals`;
+   - leeches → Flag and fix below;
    - problems from the last run → fix the cause, rerun the failed step.
 3. **The request.** Read the free text as intent, for example:
    - "add goal CS4804 exam 2 on Nov 20" → create the goal (Goals below);
@@ -107,11 +114,16 @@ never creates a calendar event; the daily quota events are the only ones studiou
 
 ## Flag and fix
 
-`uv run scripts/anki.py flagged COURSE` lists flagged cards with the lesson block they came from.
+`uv run scripts/anki.py flagged COURSE` lists flagged cards, and leeches (`leech: true`, cards
+lapsed 8 times), with the lesson block they came from.
 For each: decide whether the card is wrong, ambiguous, overloaded (split it), or fine and the gap is
-the user's (point them to the lesson section). Fix the block in the lesson, re-verify that card
+the user's (point them to the lesson section; for a leech, `anki.py clear-leech GUID` then drops
+its tag without an edit). Fix the block in the lesson, re-verify that card
 against the source, push the lesson (updates keep review history), then clear the flag with
-`anki.py set-flag 0 CARD_ID`. Note what changed in `studious/reports/`. When a split or merge
+`anki.py set-flag 0 CARD_ID` (a leech loses its `leech` tag by itself: push drops it from any card
+whose block changed since its last push). Note what changed in `studious/reports/`. A leech
+replaced by new cards (a split, a rewrite) leaves its old note behind: delete it with
+`anki.py delete-notes`, after the user's OK on the dry run. When a split or merge
 removes a block, its note is suspended by the next daily run (references/cards.md, Removing a
 card); a flagged card shown with `orphaned: true` has no block left, so there is nothing to fix:
 clear its flag.
@@ -139,6 +151,7 @@ studious/calendar.json  managed calendar events                 attachments/
 studious/retired.json   cards suspended for retired courses
 studious/pushed.json    each card's fingerprint at its last push
 studious/orphaned.json  cards suspended because their block left the vault
+studious/reading.json   each lesson on the reading list, and the first day it was there
 Dashboard.base          lesson and goal views (Obsidian Bases)
 ```
 

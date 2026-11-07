@@ -17,7 +17,7 @@ Commands (all print JSON):
   observe ROOT [--since-days N]
                               card states, FSRS estimates, revlog, today's counts for a course root deck
                               (ROOT is a course code from the config, or a deck name)
-  flagged ROOT                flagged cards of ROOT, matched to their lesson card blocks
+  flagged ROOT                flagged and leech-tagged cards of ROOT, matched to their lesson card blocks
   limits ROOT [--new N] [--today N] [--preset NAME]
                               a course root's own new cards/day ("This deck") and "Today only"
   rename-deck OLD NEW         rename a deck and its subdecks (CS3214 -> <group>::CS3214), keeping
@@ -32,6 +32,7 @@ Commands (all print JSON):
   reposition CARD_ID...       put these new cards first, in order
   set-flag FLAG CARD_ID...    0 clears
   suspend CARD_ID... | unsuspend CARD_ID...
+  clear-leech GUID...         drop the `leech` tag from notes the user judged fine (patch v11)
   delete-notes [GUID...] [--file F] [--dry-run]
                               delete studious notes for good (only with the user's OK on the dry-run
                               list); refuses guids still in a card block or not made by studious
@@ -347,7 +348,8 @@ def vault_record(vault, name):
     """A JSON record studious keeps in the vault, `studious/<name>.json`, as (path, data); {} when missing.
       pushed    guid -> card_hash at its last push
       orphaned  guid -> {course, cardIds}: cards suspended because no card block has the guid (plan.py)
-      retired   course -> card ids suspended for a retired course"""
+      retired   course -> card ids suspended for a retired course
+      reading   lesson path -> the first day it was on the day's reading list (plan.py)"""
     path = Path(vault) / f'studious/{name}.json'
     return path, (json.loads(path.read_text()) if path.exists() else {})
 
@@ -611,13 +613,16 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
                             v = v.replace(f'src="{name}"', f'src="{actual}"')
                     note['fields'][k] = v
         course = lesson['course']
+        hashes = {c['meta']['id']: card_hash(text, c) for c in cards}
+        for note in send:  # a card block fixed since its last push stops being a leech (patch v11)
+            if note['guid'] in existing and record.get(note['guid']) != hashes.get(note['guid']):
+                note['dropTags'] = ['leech']
         try:
             results = anki.call('studiousUpsertNotes', notes=send,
                                 ownedTagPrefixes=[f'{course}::exam::', f'{course}::cheatsheet::'])
         except Refused as exc:
             entry['errors'].append(str(exc))
             continue
-        hashes = {c['meta']['id']: card_hash(text, c) for c in cards}
         for r in results:
             entry[r['action']] += 1
             record[r['guid']] = hashes[r['guid']]
@@ -739,6 +744,7 @@ def main(argv=None):
     p.add_argument('cards', nargs='+', type=int)
     for name in ('suspend', 'unsuspend'):
         sub.add_parser(name).add_argument('cards', nargs='+', type=int)
+    sub.add_parser('clear-leech').add_argument('guids', nargs='+')
     p = sub.add_parser('delete-notes')
     p.add_argument('guids', nargs='*')
     p.add_argument('--file', help='a file with one guid per line (or any whitespace)')
@@ -795,14 +801,17 @@ def main(argv=None):
         elif args.cmd == 'flagged':
             cards = anki.call('studiousObserve', root=resolve_root(config, args.root), sinceMs=0)['cards']
             pushed = vault_record(args.vault, 'pushed')[1]
-            out = []
+            out, leech_notes = [], set()
             for c in cards:
-                if not c['flag']:
-                    continue
+                leech = any(t.lower() == 'leech' for t in c.get('tags') or [])
+                if not c['flag'] and (not leech or c['guid'] in leech_notes):
+                    continue  # a leech is a note tag: one entry per note unless a card is flagged
+                if leech:
+                    leech_notes.add(c['guid'])
                 block = find_card(args.vault, c['guid'])
                 # orphaned: studious made it but no lesson has its block (the daily run suspends it)
                 out.append(dict(cardId=c['cardId'], guid=c['guid'], flag=c['flag'], lapses=c['lapses'], card=block,
-                                orphaned=block is None and studious_owned(c['guid'], pushed)))
+                                orphaned=block is None and studious_owned(c['guid'], pushed), leech=leech))
         elif args.cmd == 'limits':
             out = anki.call('studiousSetLimits', root=resolve_root(config, args.root), newPerDay=args.new, newToday=args.today,
                             preset=args.preset)
@@ -823,6 +832,8 @@ def main(argv=None):
             out = anki.call('studiousSetFlag', cardIds=args.cards, flag=args.flag)
         elif args.cmd in ('suspend', 'unsuspend'):
             out = anki.call('studiousSuspend', cardIds=args.cards, suspended=args.cmd == 'suspend')
+        elif args.cmd == 'clear-leech':
+            out = anki.call('studiousRemoveTags', guids=args.guids, tags=['leech'])
         elif args.cmd == 'delete-notes':
             guids = args.guids + (Path(args.file).read_text(encoding='utf-8').split() if args.file else [])
             out = delete_notes(anki, args.vault, guids, args.dry_run)

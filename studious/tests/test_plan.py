@@ -9,7 +9,7 @@ planner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(planner)
 
 CONFIG = dict(cards_per_day=150, max_lessons_per_day=2,
-              lesson_buffer_days=3, cram_days=2, casual_new_per_day=5, budget_new_per_day=10,
+              lesson_buffer_days=3, prep_days=2, exam_recall_target=0.9, casual_new_per_day=5, budget_new_per_day=10,
               backlog_overdue_threshold=0, calendar_days=7, vault_name='vault')
 TODAY_NUM = 1000
 NEXT_DAY = [0.0, 1.0] + [0.0] * 88  # test review curve: each new card comes back once, the next day
@@ -20,6 +20,12 @@ def card(cid, course='CS3214', deck=None, goals=(), type_=0, due=None, queue=Non
                 type=type_, queue=queue if queue is not None else type_, due=due if due is not None else cid,
                 reps=0, lapses=0, flag=0, suspended=False, retrievability=None,
                 tags=[f'{course}::exam::{g}' for g in goals])
+
+
+def reviewed(cid, r, s, goals=('Test2',), course='CS3214', **kw):
+    """A card with a memory state: recall r today, stability s days."""
+    c = card(cid, course=course, goals=goals, type_=2, queue=2, due=TODAY_NUM + 5, **kw)
+    return dict(c, retrievability=r, stability=s, reps=3)
 
 
 def lesson(n, course='CS3214', goals=('Test2',), done=False, verified=True, cards=3, pushed=False):
@@ -98,25 +104,8 @@ def test_too_many_lessons_means_cram():
     assert [len(d['lessons']) for d in p['days']][:4] == [2, 2, 1, 1]  # packed until the day before
     assert all(x['ungated'] for x in p['push']) and len(p['push']) == 6
     assert '• Cram: CS3214 Test2 (4 days left)' in p['days'][0]['description']
-    assert p['cram'] == []  # the cram deck only for the final 2 days
+    assert p['prep'] == []  # the prep deck only for the final 2 days
 
-
-def test_cram_deck_in_the_final_days():
-    ls = [lesson(n) for n in range(1, 4)]
-    p = planner.plan(state([goal(date='2026-11-03')], ls))
-    assert p['cram'] == [dict(name='CS3214::Test2 cram', limit=9999,
-                              search='deck:"CS3214" tag:CS3214::exam::Test2 prop:r<0.85')]
-
-
-
-def test_cram_deck_sits_inside_a_grouped_course_deck():
-    ls = [lesson(n) for n in range(1, 4)]
-    courses = {'CS3214': dict(course([]), root='Fall-2026::CS3214')}
-    p = planner.plan(state([goal(date='2026-11-03')], ls, courses=courses))
-    assert p['cram'] == [dict(name='Fall-2026::CS3214::Test2 cram', limit=9999,
-                              search='deck:"Fall-2026::CS3214" tag:CS3214::exam::Test2 prop:r<0.85')]
-    p = planner.plan(state([goal(date='2026-11-03', status='archived')], ls, courses=courses))
-    assert p['cram_delete'] == ['Fall-2026::CS3214::Test2 cram']
 
 def test_forced_cram():
     p = planner.plan(state([goal(date='2026-12-20', cram=True)], [lesson(1)]))
@@ -210,32 +199,11 @@ def test_reposition_puts_scope_first_interleaving_lessons():
     assert p['courses']['CS3214']['reposition'] == [2, 4, 3, 1]
 
 
-def test_past_goal_asks_and_removes_cram_deck():
-    p = planner.plan(state([goal(date='2026-10-30')]))
-    assert any('archive it, or carry its unread lessons' in i for i in p['inbox'])
-    assert p['cram_delete'] == ['CS3214::Test2 cram']
-
-
-def test_archived_or_done_goal_loses_its_cram_deck():
-    cards = [card(i, goals=['Test2']) for i in range(10)]
-    for status in ('archived', 'done'):  # e.g. archived on its exam day, before the next run
-        p = planner.plan(state([goal(date='2026-11-01', cram=True, status=status)],
-                               courses={'CS3214': course(cards)}))
-        assert p['cram'] == [] and p['cram_delete'] == ['CS3214::Test2 cram']
-
-
 def test_a_zero_cap_warns_instead_of_failing():
     cards = [card(i, goals=['Test2']) for i in range(40)]
     p = planner.plan(state([goal(date='2026-11-11')], courses={'CS3214': course(cards)}, cards_per_day=0))
     assert sum(d['new'] for d in p['days']) > 0  # the exam's cards still go in
     assert any('Raise cards_per_day to about' in w for w in p['warnings'])
-
-
-def test_goal_without_material_reminds_within_21_days():
-    p = planner.plan(state([goal(date='2026-11-15')]))
-    assert any('no material yet' in i for i in p['inbox'])
-    far = planner.plan(state([goal(date='2027-01-15')]))
-    assert not any('no material' in i for i in far['inbox'])
 
 
 def test_event_text_format():
@@ -275,8 +243,8 @@ def test_no_new_cards_for_a_goal_on_its_exam_day():
     c = p['courses']['CS3214']
     assert p['goals'][0]['required_new_per_day'] == 0
     assert c['new_per_day'] == 0 and c['new_today'] is None  # not even the casual 5: they'd be Test2 cards
-    assert [d['name'] for d in p['cram']] == ['CS3214::Test2 cram']  # weak cards to look over that morning
-    assert '• Cram: CS3214 Test2 (today)' in p['days'][0]['description']
+    assert [d['name'] for d in p['prep']] == ['CS3214::Test2 prep']  # its unseen cards, that morning
+    assert '• Prep: CS3214 Test2, 40 cards (today, cram mode)' in p['days'][0]['description']
 
 
 def test_exam_day_course_keeps_its_other_goals_pace_in_their_order():
@@ -300,11 +268,6 @@ def test_exam_day_does_not_skip_the_backlog_or_the_budget():
                            courses={'CS3214': busy}, cards_per_day=30))
     assert p['courses']['CS3214']['new_per_day'] <= 5  # 25 reviews today leave room for 5
     assert not p['goals'][1]['cram']  # the Final's 90 still fit over its other days
-
-
-def test_on_pace_goal_gets_no_cram_deck_on_its_exam_day():
-    p = planner.plan(state([goal(date='2026-11-01')], [lesson(1, done=True, pushed=True)]))
-    assert p['cram'] == [] and p['cram_delete'] == ['CS3214::Test2 cram']
 
 
 def test_forecast_rests_a_course_on_its_exam_day():
@@ -346,7 +309,9 @@ def test_timetable_rows_now_and_sessions():
     assert md.count('<tr>') == 3  # header + 2 topics
     assert '80% · 1/2' in md and 'rgba(210,153,34,.40)' in md  # amber now for L01
     assert 'unseen · 0/1' in md
-    assert '<th>Oct 30</th>' in md and '>50%<' in md  # one Again out of two reviews
+    assert '<th>Oct 30</th>' in md and '>2 reviews<' in md and '>50%<' not in md  # too few to color
+    c['revlog'].append(dict(id=noon + 2, cardId=1, ease=3, kind=1, ms=4000))
+    assert '>67%<' in timetable.render(s, s['goals'][0])  # three reviews: colored, one Again of three
     assert '✓' in md
     assert 'cram:' not in md  # no plan, no verdict
     assert timetable.filename(s['goals'][0]) == 'CS3214-Test2 timetable.md'  # not the goal note's name
@@ -380,7 +345,7 @@ def test_retired_course_is_suspended_and_left_out():
     assert p['suspend'] == [1, 2] and p['unsuspend'] == [] and p['retired'] == {'CS3214': [1, 2]}
     assert p['courses']['CS3214']['retired'] and p['courses']['CS3214']['new_per_day'] == 0
     assert p['push'] == [] and p['goals'] == [] and not any(d['lessons'] for d in p['days'])
-    assert p['cram_delete'] == ['CS3214::Test2 cram'] and not p['inbox']
+    assert p['prep_delete'] == ['CS3214::Test2 cram', 'CS3214::Test2 prep'] and not p['inbox']
 
 
 def test_unretiring_unsuspends_only_what_studious_suspended():
@@ -453,14 +418,6 @@ def test_today_only_limit_is_never_below_the_daily_limit():
                            courses={'CS3214': course(cards)}))
     c = p['courses']['CS3214']
     assert c['new_per_day'] > 4 and c['new_today'] == c['new_per_day']  # the quiz's 4 plus some of the exam's
-
-
-def test_cram_deck_is_deleted_once_cram_mode_ends():
-    s = state([goal(date='2026-11-02', cram=True)], [lesson(1, done=True, pushed=True)])
-    assert [d['name'] for d in planner.plan(s)['cram']] == ['CS3214::Test2 cram']
-    s['goals'][0]['cram'] = False
-    p = planner.plan(s)
-    assert p['cram'] == [] and p['cram_delete'] == ['CS3214::Test2 cram']
 
 
 def test_unverified_lessons_are_not_put_on_the_calendar():
@@ -608,3 +565,215 @@ def test_a_state_without_vault_guids_detects_nothing():
     s = orphan_state([owned(card(1, guid='cs3214_aaaaaaaaaaaa'))])
     del s['vault_guids']
     assert planner.plan(s)['orphans']['suspend'] == []
+
+
+# ---- prep decks ----------------------------------------------------------------------------------
+
+UNSEEN = 'deck:"CS3214" tag:CS3214::exam::Test2 is:new -is:suspended'
+
+
+def test_recall_follows_the_fsrs_forgetting_curve():
+    assert abs(planner.recall_after(0.9, 10, 10, decay=0.5) - (1 + 19 / 81 * 2) ** -0.5) < 1e-9  # 0.825
+    assert round(planner.recall_after(0.9, 10, 10, decay=0.5), 3) == 0.825
+    assert round(planner.recall_after(0.9, 10, 0), 3) == 0.9  # today stays today
+    assert planner.recall_after(0.95, 30, 3) < 0.95 and planner.recall_after(None, 30, 3) is None
+    assert planner.recall_after(0.9, 0, 3) is None
+
+
+def test_every_goal_gets_a_prep_deck_of_cards_below_target_on_exam_day():
+    cards = [reviewed(1, 0.91, 2), reviewed(2, 0.99, 400), reviewed(3, 0.80, 5), reviewed(4, 0.85, 3, goals=['Other']),
+             card(5, goals=['Test2']), dict(reviewed(6, 0.5, 1), suspended=True), dict(reviewed(7, 0.6, 1), type=1)]
+    p = planner.plan(state([goal(date='2026-11-03')], courses={'CS3214': course(cards)}))
+    assert not p['goals'][0]['cram']
+    assert p['prep'] == [dict(name='CS3214::Test2 prep', search='cid:3,1', limit=2, order=8, goal='Test2',
+                              course='CS3214', weak=2, unseen=0, cards=2)]  # weakest first; no new, suspended or learning
+    assert 'CS3214::Test2 prep' not in p['prep_delete'] and 'CS3214::Test2 cram' in p['prep_delete']
+    assert '• Prep: CS3214 Test2, 2 cards (2 days left)' in p['days'][0]['description']
+    assert '• Prep: CS3214 Test2 (1 day left)' in p['days'][1]['description']
+
+
+def test_prep_deck_waits_for_the_last_prep_days():
+    p = planner.plan(state([goal(date='2026-11-04')], courses={'CS3214': course([reviewed(1, 0.8, 2)])}))
+    assert p['prep'] == [] and 'CS3214::Test2 prep' in p['prep_delete']
+    assert 'Prep:' not in p['days'][0]['description'] and '• Prep: CS3214 Test2 (2 days left)' in p['days'][1]['description']
+
+
+def test_cram_mode_adds_the_unseen_cards_after_the_weak_ones():
+    cards = [reviewed(1, 0.8, 5), reviewed(2, 0.99, 100)] + [card(10 + i, goals=['Test2']) for i in range(5)]
+    p = planner.plan(state([goal(date='2026-11-03', cram=True)], courses={'CS3214': course(cards)}))
+    assert p['prep'] == [dict(name='CS3214::Test2 prep', search='cid:1', limit=1, order=8, search2=UNSEEN,
+                              limit2=9999, order2=6, goal='Test2', course='CS3214', weak=1, unseen=5, cards=6)]
+    assert '• Prep: CS3214 Test2, 6 cards (2 days left, cram mode)' in p['days'][0]['description']
+    only_new = planner.plan(state([goal(date='2026-11-03', cram=True)], courses={'CS3214': course(cards[2:])}))
+    assert only_new['prep'][0]['search'] == UNSEEN and only_new['prep'][0]['order'] == 6
+    calm = planner.plan(state([goal(date='2026-11-03')], courses={'CS3214': course(cards)}))
+    assert 'search2' not in calm['prep'][0]  # out of cram mode: the weak cards only
+
+
+def test_prep_deck_sits_inside_a_grouped_course_deck():
+    courses = {'CS3214': dict(course([reviewed(1, 0.8, 5)] + [card(9, goals=['Test2'])]), root='Fall-2026::CS3214')}
+    p = planner.plan(state([goal(date='2026-11-03', cram=True)], courses=courses))
+    assert p['prep'][0]['name'] == 'Fall-2026::CS3214::Test2 prep'
+    assert p['prep'][0]['search2'] == 'deck:"Fall-2026::CS3214" tag:CS3214::exam::Test2 is:new -is:suspended'
+    p = planner.plan(state([goal(date='2026-11-03', status='archived')], courses=courses))
+    assert p['prep'] == [] and p['prep_delete'] == ['Fall-2026::CS3214::Test2 cram', 'Fall-2026::CS3214::Test2 prep']
+
+
+def test_nothing_to_prep_is_a_note_not_a_deck():
+    p = planner.plan(state([goal(date='2026-11-01')], [lesson(1, done=True, pushed=True)],
+                           courses={'CS3214': course([reviewed(1, 0.99, 300)])}))
+    assert p['prep'] == [] and p['prep_delete'] == ['CS3214::Test2 cram', 'CS3214::Test2 prep']
+    assert p['notes'] == ['CS3214 Test2 prep: nothing below 0.90 on exam day.']
+    assert 'Prep:' not in p['days'][0]['description']
+
+
+def test_archived_done_or_past_goals_lose_their_decks():
+    cards = [reviewed(1, 0.5, 2)]
+    for kw in (dict(status='archived'), dict(status='done'), dict(date='2026-10-30')):
+        p = planner.plan(state([goal(**{'date': '2026-11-01', 'cram': True, **kw})], courses={'CS3214': course(cards)}))
+        assert p['prep'] == [] and p['prep_delete'] == ['CS3214::Test2 cram', 'CS3214::Test2 prep']
+
+
+def test_cram_days_still_works_with_a_warning():
+    s = state([goal(date='2026-11-04')], courses={'CS3214': course([reviewed(1, 0.8, 2)])})
+    s['config'] = {k: v for k, v in s['config'].items() if k != 'prep_days'} | dict(cram_days=3)
+    s['config_set'] = ['cram_days']
+    p = planner.plan(s)
+    assert [d['name'] for d in p['prep']] == ['CS3214::Test2 prep']  # 3 days out, inside cram_days 3
+    assert any('cram_days, which is now prep_days' in w for w in p['warnings'])
+    s['config']['prep_days'], s['config_set'] = 2, ['cram_days', 'prep_days']
+    p = planner.plan(s)
+    assert p['prep'] == [] and any('cram_days is ignored' in w for w in p['warnings'])
+
+
+def test_exam_recall_target_sets_the_bar():
+    cards = [reviewed(1, 0.95, 30)]
+    p = planner.plan(state([goal(date='2026-11-03')], courses={'CS3214': course(cards)}))
+    assert p['prep'] == []  # about 0.94 on exam day
+    p = planner.plan(state([goal(date='2026-11-03')], courses={'CS3214': course(cards)}, exam_recall_target=0.97))
+    assert p['prep'][0]['search'] == 'cid:1'
+
+
+# ---- inbox nudges ------------------------------------------------------------------------------------
+
+def test_new_material_lists_folders_blueprints_first():
+    sources = {'CS4824': dict(new={'Fall-2026/cs4824/notes': {'course-material': 10},
+                                   'Fall-2026/cs4824/test2': {'exam-blueprint': 4},
+                                   'Fall-2026/cs4824/tmp/pdfs': {'course-material': 5, 'exam-blueprint': 1},
+                                   'Fall-2026/cs4824/assignment2': {'course-material': 9},
+                                   'Fall-2026/cs4824': {'course-material': 1}},
+                              changed=2, base=['Fall-2026/cs4824']),
+               'CS3214': dict(new={}, changed=1, base=['Fall-2026/cs3214']),
+               'CMDA3654': dict(new={'Fall-2026/cmda3654': {'course-material': 2}}, changed=0, base=['Fall-2026/cmda3654'])}
+    s = state()
+    s['sources'] = sources
+    assert planner.plan(s)['inbox'] == [
+        'CMDA3654: new material in cmda3654: ingest it?',
+        'CS3214: 1 changed source file: update their lessons?',
+        'CS4824: new material in tmp/pdfs, test2, notes and 2 more folders, and 2 changed files: ingest it?']
+
+
+def test_no_material_is_flagged_as_soon_as_the_goal_exists():
+    far = planner.plan(state([goal(date='2027-01-15')]))
+    assert 'CS3214 Test2 is in 75 days and has no material yet: ingest its notes.' in far['inbox']
+    undated = planner.plan(state([goal(mode='self-paced-casual', date=None)]))
+    assert 'CS3214 Test2 has no material yet: ingest its notes.' in undated['inbox']
+
+
+def test_unseen_cards_with_no_upcoming_goal():
+    cards = [card(i, goals=['Test2']) for i in range(4)]
+    ls = [lesson(1, cards=3), lesson(2, verified=False, cards=5)]
+    p = planner.plan(state([goal(date='2026-10-30')], ls, courses={'CS3214': course(cards)}))
+    assert 'CS3214: 7 unseen cards and no upcoming goal: add one?' in p['inbox']  # 4 in Anki + 3 verified unpushed
+    later = planner.plan(state([goal(date='2026-10-30'), goal('Final', date='2026-12-15')], ls,
+                               courses={'CS3214': course(cards)}))
+    assert not any('no upcoming goal' in i for i in later['inbox'])
+    casual = planner.plan(state([goal(date='2026-10-30'), goal('Self', mode='self-paced-casual', date=None)], ls,
+                                courses={'CS3214': course(cards)}))
+    assert not any('no upcoming goal' in i for i in casual['inbox'])
+    done = state([goal(date='2026-10-30')], ls, courses={'CS3214': course(cards)})
+    done['config']['courses'] = {'CS3214': {'done': True}}
+    assert not any('no upcoming goal' in i for i in planner.plan(done)['inbox'])
+
+
+def test_past_goal_counts_the_cards_never_shown():
+    cards = [card(i, goals=['Test2']) for i in range(5)] + [reviewed(9, 0.9, 5)]
+    p = planner.plan(state([goal(date='2026-10-30')], [lesson(1, cards=2)], courses={'CS3214': course(cards)}))
+    assert ('CS3214 Test2 was on 2026-10-30, 7 cards never shown: carry its lessons into a later goal, '
+            'or archive it?') in p['inbox']
+    seen = planner.plan(state([goal(date='2026-10-30')], courses={'CS3214': course([reviewed(9, 0.9, 5)])}))
+    assert ('CS3214 Test2 was on 2026-10-30: archive it, or carry its unread lessons into a later goal?'
+            in seen['inbox'])
+
+
+def test_a_lesson_left_unread_for_two_days_goes_in_the_inbox():
+    ls = [lesson(n) for n in range(1, 5)]
+    day1 = planner.plan(state([goal(date='2026-11-11')], ls))
+    assert day1['reading'] == {'courses/CS3214/lessons/01-l1.md': '2026-11-01'}
+    assert not any('on your list' in i for i in day1['inbox'])
+    s = state([goal(date='2026-11-11')], ls, today='2026-11-03')
+    s['reading'] = day1['reading']
+    day3 = planner.plan(s)
+    assert 'lesson1 has been on your list since Nov 1: read it, or push it back?' in day3['inbox']
+    assert day3['reading']['courses/CS3214/lessons/01-l1.md'] == '2026-11-01'
+    ls[0]['done'] = True
+    s = state([goal(date='2026-11-11')], ls, today='2026-11-03')
+    s['reading'] = day1['reading']
+    assert 'courses/CS3214/lessons/01-l1.md' not in planner.plan(s)['reading']  # read: off the record
+
+
+def test_last_seven_days_under_half_the_cap_warn():
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    def at(day_, i):
+        return int(dt.datetime(2026, 10, day_, 12, tzinfo=ZoneInfo('America/New_York')).timestamp() * 1000) + i
+    c = course([])
+    c['revlog'] = [dict(id=at(d, i), cardId=d * 100 + i, ease=3, kind=1, ms=1000) for d in range(25, 32) for i in range(4)]
+    s = state(courses={'CS3214': c}, cards_per_day=100, timezone='America/New_York')
+    assert 'Last 7 days: about 4 cards a day, against cards_per_day 100.' in planner.plan(s)['warnings']
+    assert not any(w.startswith('Last ') for w in planner.plan(dict(s, config={**s['config'], 'cards_per_day': 8}))['warnings'])
+    c['revlog'] = [r for r in c['revlog'] if r['id'] >= at(30, 0)]  # a fresh setup: only 2 days of history
+    assert 'Last 2 days: about 4 cards a day, against cards_per_day 100.' in planner.plan(s)['warnings']
+    c['revlog'] = []
+    assert not any(w.startswith('Last ') for w in planner.plan(s)['warnings'])
+
+
+def test_a_small_backlog_no_longer_stops_new_cards():
+    overdue = [card(500 + i, type_=2, queue=2, due=TODAY_NUM - 1) for i in range(5)]
+    cards = [card(i) for i in range(30)]
+    few = planner.plan(state(courses={'CS3214': course(cards + overdue)}, backlog_overdue_threshold=10))
+    assert few['courses']['CS3214']['new_per_day'] == 5
+    more = [card(600 + i, type_=2, queue=2, due=TODAY_NUM - 1) for i in range(6)]
+    many = planner.plan(state(courses={'CS3214': course(cards + overdue + more)}, backlog_overdue_threshold=10))
+    assert many['courses']['CS3214']['new_per_day'] == 0
+
+
+def test_leeches_are_counted_in_the_inbox():
+    cards = [dict(reviewed(1, 0.5, 1), tags=['CS3214::exam::Test2', 'leech']), dict(reviewed(2, 0.5, 1), tags=['Leech']),
+             dict(reviewed(3, 0.5, 1), tags=['leech'], suspended=True), reviewed(4, 0.9, 9)]
+    p = planner.plan(state([goal()], courses={'CS3214': course(cards)}))
+    assert 'CS3214: 2 leeches (cards you keep forgetting): fix them?' in p['inbox']
+
+
+def test_a_card_goes_to_the_nearest_goals_prep_deck_only():
+    cards = [reviewed(1, 0.7, 3, goals=['Test2', 'Final']), reviewed(2, 0.7, 3, goals=['Final'])]
+    p = planner.plan(state([goal(date='2026-11-02'), goal('Final', date='2026-11-03')],
+                           courses={'CS3214': course(cards)}))
+    assert [(d['name'], d['search']) for d in p['prep']] == [('CS3214::Test2 prep', 'cid:1'), ('CS3214::Final prep', 'cid:2')]
+
+
+def test_an_older_patch_gets_no_unseen_filter():
+    cards = [reviewed(1, 0.8, 5)] + [card(10 + i, goals=['Test2']) for i in range(5)]
+    s = state([goal(date='2026-11-03', cram=True)], courses={'CS3214': course(cards)})
+    s['patch'] = 10
+    p = planner.plan(s)
+    assert 'search2' not in p['prep'][0] and p['prep'][0]['cards'] == 1
+    assert '• Prep: CS3214 Test2, 1 card (2 days left, cram mode)' in p['days'][0]['description']
+    s['courses'] = {'CS3214': course(cards[1:])}
+    assert planner.plan(s)['prep'] == []  # unseen cards only: nothing an older patch can build
+
+
+def test_a_leech_note_counts_once():
+    cloze = [dict(reviewed(i, 0.5, 1), noteId=50, tags=['leech']) for i in (1, 2, 3)]
+    p = planner.plan(state([goal()], courses={'CS3214': course(cloze)}))
+    assert 'CS3214: 1 leech (cards you keep forgetting): fix them?' in p['inbox']

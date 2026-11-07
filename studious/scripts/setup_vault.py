@@ -32,7 +32,7 @@ courses: {}
 cards_per_day: 150
 max_lessons_per_day: 2
 lesson_buffer_days: 3
-cram_days: 2
+prep_days: 2
 ---
 # studious config
 
@@ -74,17 +74,19 @@ courses:
 | `max_lessons_per_day` | `2` | Most lessons scheduled on one day, across all goals. Cram mode may go over it (with a warning). |
 | `casual_new_per_day` | `5` | New cards a day for a course with cards but no deadline pressure, and for casual goals. |
 | `budget_new_per_day` | `10` | Minimum new cards a day for a course with a self-paced budgeted goal. |
-| `backlog_overdue_threshold` | `0` | A course with more overdue reviews than this gets no new cards until they're done, unless one of its exams is within `cram_days`. |
+| `backlog_overdue_threshold` | `10` | A course with more overdue reviews than this gets no new cards today, unless one of its exams is within `prep_days`. A few leftovers from yesterday don't count; a skipped day does. |
 
-## Deadlines and cram
+## Deadlines and prep decks
 
 | Key | Default | What it does |
 |---|---|---|
 | `lesson_buffer_days` | `3` | Lessons are scheduled to finish this many days before a deadline, leaving those days for reviews. |
-| `cram_days` | `2` | In cram mode, the last this many days before an exam get a filtered deck of your weakest cards (`CS3214::Test2 cram`, inside the course deck). |
+| `prep_days` | `2` | Every exam gets a prep deck for its last this many days, through the exam day (`CS3214::Test2 prep`, inside the course deck): the cards you'd likely forget by exam day, weakest first, and in cram mode also the cards you haven't seen yet. It replaces `cram_days`, which still works for now (with an inbox warning to rename it). |
+| `exam_recall_target` | `0.90` | A card goes into the prep deck when its expected recall on exam day, from Anki's memory model, is below this. Lower it if prep decks get too big. |
 
 A goal switches to cram mode by itself when its lessons or cards can't fit at the normal pace, or
-when you set `cram: true` in the goal note.
+when you set `cram: true` in the goal note. Cram mode pushes cards without waiting for lessons and
+adds the goal's unseen cards to its prep deck.
 
 ## Calendar
 

@@ -12,9 +12,10 @@
    root (`CS3214` -> `Fall-2026::CS3214`), keeping its cards and review history.
 3. Snapshot and plan; push the cards of lessons marked done (or all in-scope cards in cram mode),
    and edits and retags of cards already in Anki; re-snapshot and re-plan if anything was pushed.
-4. Apply the plan to Anki: new cards/day per course, today-only overrides, reposition, cram decks.
-   Then, as a step of its own, suspend notes whose card block is gone from the vault (listed in the
-   inbox) and unsuspend those whose block is back.
+4. As a step of its own, suspend notes whose card block is gone from the vault (listed in the inbox)
+   and unsuspend those whose block is back. Then apply the plan to Anki: new cards/day per course,
+   today-only overrides, reposition, prep decks (patch v11; an older patch gets only the weak-card
+   part, as `<goal> cram`), and the reading record.
 5. Regenerate the timetables, write the calendar events.
 6. AnkiWeb sync again, quit Anki if this run started it, write the inbox, commit the vault (local git).
 7. Write a run log outside the vault, to ~/.local/state/studious/runs/<vault>/ (the last 60 are kept).
@@ -133,6 +134,7 @@ class Run:
         self.attention = []  # notes the user has to act on: they go to the inbox too
         self.orphans = []  # notes suspended this run because their card block is gone: listed in the inbox
         self.launched_anki = False
+        self.patch = None  # the open Anki's studious patch version, from studiousVersion
         self.pushed = False  # whether a push changed Anki, even if another lesson failed
 
     def step(self, name, fn, *args, required=False):
@@ -191,6 +193,7 @@ class Run:
                 raise RuntimeError('Anki did not start within 60 s' + (f': {display_note}' if display_note else ''))
         if version['profile'] != self.client.profile:
             raise RuntimeError(f"Anki is open on profile {version['profile']!r}, not {self.client.profile!r}")
+        self.patch = int(version.get('patch') or 0)
         return version
 
     def anki_sync(self):
@@ -261,8 +264,11 @@ class Run:
         return report
 
     def apply(self, plan):
+        for text in plan.get('notes') or []:  # e.g. a prep deck with nothing to put in it
+            self.note(text)
         if self.dry_run:
             return 'dry run'
+        anki.write_record(self.vault / 'studious/reading.json', plan.get('reading') or {})
         done = any(c.get('done') for c in plan['courses'].values())
         # The preset's new cards/day also caps each lesson subdeck, so it must cover the largest course
         # limit (a cram day can go over the all-course budget).
@@ -281,27 +287,40 @@ class Run:
                                  preset=names[1] if c.get('done') else names[0])
             except anki.Refused as exc:
                 if 'does not exist' in str(exc):
-                    continue  # no cards for this course yet
+                    c['reposition'] = None  # no cards for this course yet
+                    continue
                 raise
-            if c['reposition']:
-                self.client.call('studiousReposition', cardIds=c['reposition'])
-        for deck in plan['cram']:
-            try:
-                self.client.call('studiousCram', name=deck['name'], search=deck['search'], limit=deck['limit'])
-            except anki.Refused as exc:  # one cram deck failing doesn't stop the rest of the apply
-                if 'No cards matched' in str(exc):
-                    self.notes.append(f"{deck['name']}: no weak cards to cram yet (none reviewed below 85%).")
-                elif 'cram deck names' in str(exc):
-                    self.note(f"{deck['name']} not built: this machine's Anki runs a patch older than v9, which "
-                              "can't put a cram deck inside a grouped course deck. In the connectors clone: "
-                              "git pull, python3 anki/apply.py, then restart Anki.", attention=True)
-                else:
-                    self.note(f"{deck['name']} not built: {exc}", attention=True)
-        for name in plan['cram_delete']:
+        # Empty every prep and old cram deck first, today's included: Anki won't put a card that sits in
+        # another filtered deck into a new one, and repositioning reaches only cards in their home deck.
+        old_patch = (self.patch or 0) < 11  # no prep names, orders or second filter before v11
+        builds = []
+        for deck in plan['prep']:
+            params = {k: deck[k] for k in ('name', 'search', 'limit', 'order', 'search2', 'limit2', 'order2')
+                      if deck.get(k) is not None}
+            if old_patch:  # the planner left the unseen cards out; the old name rule wants `cram`
+                params = dict(name=deck['name'][:-len(' prep')] + ' cram', search=deck['search'], limit=deck['limit'])
+            builds.append((deck, params))
+        for name in sorted(set(plan['prep_delete']) | {p['name'] for _, p in builds}):
             try:
                 self.client.call('studiousCramDelete', name=name)
             except anki.Refused:
                 pass  # never built
+        for code, c in plan['courses'].items():
+            if c['reposition']:
+                self.client.call('studiousReposition', cardIds=c['reposition'])
+        for deck, params in builds:
+            try:
+                self.client.call('studiousCram', **params)
+            except anki.Refused as exc:  # one prep deck failing doesn't stop the rest of the apply
+                if 'No cards matched' in str(exc):
+                    self.note(f"{deck['course']} {deck['goal']} prep: no cards matched (reviewed since the plan?).")
+                else:
+                    self.note(f"{params['name']} not built: {exc}", attention=True)
+        if old_patch and plan['prep']:
+            self.note(f"Prep decks need the studious patch v11 (this machine's Anki runs v{self.patch}): only the "
+                      "cards below the exam-day target went in, as `<goal> cram`, without a cram goal's unseen "
+                      "cards. In the connectors clone: git pull, python3 anki/apply.py, then restart Anki.",
+                      attention=True)
         if plan['suspend']:
             self.client.call('studiousSuspend', cardIds=plan['suspend'], suspended=True)
         if plan['unsuspend']:
@@ -465,8 +484,10 @@ def main(argv=None):
             run.step('push cards', run.push, plan['push'])
             if run.pushed and not args.dry_run:  # also when another lesson failed: Anki changed either way
                 state, plan = run.step('re-plan', run.make_plan, required=True)
+        # Orphans first, so a prep deck never takes a card this run suspends; each step on its own, so
+        # one failing doesn't hold the other back.
+        run.step('orphans', run.apply_orphans, plan)
         run.step('apply to anki', run.apply, plan)
-        run.step('orphans', run.apply_orphans, plan)  # on its own, so an apply failure doesn't hold it back
         run.step('optimize fsrs', run.optimize)
         run.step('timetables', run.timetables, state, plan)
         if not args.no_calendar:

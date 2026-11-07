@@ -153,6 +153,22 @@ def main():
         ok('flagged card maps back to its lesson block', len(flagged) == 1 and flagged[0]['card']
            and flagged[0]['card']['path'] == str(lesson), flagged)
 
+        # Leeches: listed by flagged; fixing the block drops the tag on the next push (patch v11), and
+        # an untouched leech keeps it.
+        other = cards[1]['id']
+        nids = {n['guid']: n['noteId'] for n in run('call', 'studiousNotes', json.dumps(
+            {'profile': args.profile, 'guids': [guid, other]}))}
+        run('call', 'addTags', json.dumps({'notes': [nids[guid], nids[other]], 'tags': 'leech'}))
+        listed = {f['guid']: f for f in run('flagged', 'StudiousSelfTest')}
+        ok('flagged lists leeches with leech: true', listed.get(other, {}).get('leech') is True
+           and listed.get(guid, {}).get('leech') is True, listed)
+        lesson.write_text(lesson.read_text().replace('It rescales', 'It rescales the joint'))
+        run('push', str(lesson))
+        tags = {n['guid']: n['tags'] for n in run('call', 'studiousNotes', json.dumps(
+            {'profile': args.profile, 'guids': [guid, other]}))}
+        ok('a fixed leech loses its tag', 'leech' not in [t.lower() for t in tags[guid]], tags[guid])
+        ok('an untouched leech keeps it', 'leech' in [t.lower() for t in tags[other]], tags[other])
+
         limits = run('limits', 'StudiousSelfTest', '--new', '5')
         ok('limits applied', limits.get('newPerDay') == 5, limits)
         shown = run('settings', 'show')

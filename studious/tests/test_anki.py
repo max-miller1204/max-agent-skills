@@ -291,6 +291,41 @@ def test_push_reports_a_refusal_and_goes_on_to_the_next_lesson(tmp_path):
     assert report[1]['errors'] == [] and report[1]['created'] == 2
 
 
+def test_push_drops_the_leech_tag_only_from_fixed_cards(tmp_path):
+    path = write_lesson(tmp_path, LESSON.replace('done: false', 'done: true'))
+    fake = FakeAnki()
+    anki.push(fake, str(tmp_path), [str(path)])
+    assert not any('dropTags' in n for n in fake.sent)  # new notes: nothing to drop
+    fake.sent = []
+    anki.push(fake, str(tmp_path), [str(path)])
+    assert not any('dropTags' in n for n in fake.sent)  # unchanged blocks keep a leech tag
+    path.write_text(path.read_text().replace('Waking does not', 'Waking alone does not'))
+    fake.sent = []
+    anki.push(fake, str(tmp_path), [str(path)])
+    assert [n.get('dropTags') for n in fake.sent].count(['leech']) == 1  # only the edited card
+
+
+def test_snapshot_lists_new_and_changed_sources(tmp_path, monkeypatch):
+    sspec = importlib.util.spec_from_file_location('snapshot', SCRIPTS / 'snapshot.py')
+    snapshot = importlib.util.module_from_spec(sspec)
+    sspec.loader.exec_module(snapshot)
+    home = tmp_path / 'home'
+    monkeypatch.setenv('HOME', str(home))
+    for rel, text in (('cs4824/notes/01.pdf', 'a'), ('cs4824/notes/deep/02.pdf', 'b'), ('cs4824/test2/review.pdf', 'c'),
+                      ('cs4824/hw1/solution.py', 'd'), ('cs4824/notes/03.pdf', 'e'), ('done/notes/x.pdf', 'f')):
+        (home / rel).parent.mkdir(parents=True, exist_ok=True)
+        (home / rel).write_text(text)
+    vault = tmp_path / 'vault'
+    (vault / 'studious/manifests').mkdir(parents=True)
+    known = snapshot.manifest.scan(['cs4824'])
+    (vault / 'studious/manifests/CS4824.json').write_text(json.dumps(
+        {'cs4824/notes/03.pdf': dict(known['cs4824/notes/03.pdf'], hash='old', status='ingested')}))
+    config = {'courses': {'CS4824': {'folders': ['cs4824']}, 'Old': {'folders': ['done'], 'done': True}}}
+    assert snapshot.sources(vault, config) == {'CS4824': dict(
+        new={'cs4824/notes': {'course-material': 2}, 'cs4824/test2': {'exam-blueprint': 1}}, changed=1,
+        base=['cs4824'])}  # homework (my-work) and done courses left out
+
+
 def test_snapshot_spells_course_codes_as_the_config_does():
     sspec = importlib.util.spec_from_file_location('snapshot', SCRIPTS / 'snapshot.py')
     snapshot = importlib.util.module_from_spec(sspec)
@@ -458,30 +493,85 @@ def test_daily_moves_a_deck_whose_group_changed(tmp_path):
     assert any('Two: its deck G::Two' in n and '2 decks could be it' in n for n in run.notes)
 
 
-def test_a_refused_cram_deck_does_not_stop_the_rest_of_the_apply(tmp_path):
+def apply_run(tmp_path, patch, fail_cram=None):
+    """A daily Run whose Anki records every call; `fail_cram` is the refusal studiousCram raises."""
     dspec = importlib.util.spec_from_file_location('daily', SCRIPTS / 'daily.py')
     daily = importlib.util.module_from_spec(dspec)
     dspec.loader.exec_module(daily)
-    (tmp_path / 'studious').mkdir()
+    (tmp_path / 'studious').mkdir(exist_ok=True)
     (tmp_path / 'studious/config.md').write_text('---\nanki_profile: Max\n---\n')
     calls = []
 
-    class OldPatch:
+    class Fake:
         def call(self, action, **params):
-            calls.append(action)
+            calls.append((action, params))
             if action == 'studiousApplySettings':
                 return dict(changes=[])
-            if action == 'studiousCram':
-                raise daily.anki.Refused('studious refused: cram deck names are "<root deck>::<goal> cram"')
+            if action == 'studiousCram' and fail_cram:
+                raise daily.anki.Refused(fail_cram)
             return {}
 
     run = daily.Run(str(tmp_path), False)
-    run.client = OldPatch()
-    plan = dict(courses={}, total_new_per_day=0, cram=[dict(name='Fall-2026::CS3214::Test2 cram', search='x', limit=1)],
-                cram_delete=['Fall-2026::CS3214::Old cram'], suspend=[1], unsuspend=[], retired={})
-    assert run.apply(plan) == 'applied'
-    assert calls[-2:] == ['studiousCramDelete', 'studiousSuspend']
-    assert any('older than v9' in n for n in run.notes)
+    run.client, run.patch = Fake(), patch
+    return run, calls
+
+
+PREP = dict(name='Fall-2026::CS3214::Test2 prep', goal='Test2', course='CS3214', search='cid:7,3', limit=2,
+            order=8, search2='deck:"Fall-2026::CS3214" tag:CS3214::exam::Test2 is:new -is:suspended', limit2=9999,
+            order2=6, weak=2, unseen=40, cards=42)
+
+
+def plan_with(prep, delete=(), **kw):
+    return dict(courses={}, total_new_per_day=0, prep=prep, prep_delete=list(delete), suspend=[1], unsuspend=[],
+                retired={}, reading=kw.pop('reading', {}), notes=kw.pop('notes', []), **kw)
+
+
+def test_a_refused_prep_deck_does_not_stop_the_rest_of_the_apply(tmp_path):
+    run, calls = apply_run(tmp_path, 11, fail_cram='studious refused: something odd')
+    assert run.apply(plan_with([PREP], ['Fall-2026::CS3214::Old prep'])) == 'applied'
+    assert [a for a, _ in calls[-2:]] == ['studiousCram', 'studiousSuspend']
+    assert any('Test2 prep not built' in n for n in run.attention)
+
+
+def test_prep_deck_on_patch_v11_sends_both_filters(tmp_path):
+    run, calls = apply_run(tmp_path, 11)
+    run.apply(plan_with([PREP], ['Fall-2026::CS3214::Test2 cram']))
+    cram = [p for a, p in calls if a == 'studiousCram']
+    assert cram == [{k: PREP[k] for k in ('name', 'search', 'limit', 'order', 'search2', 'limit2', 'order2')}]
+    assert ('studiousCramDelete', dict(name='Fall-2026::CS3214::Test2 cram')) in calls
+    assert not run.attention
+
+
+def test_an_older_patch_gets_the_weak_cards_as_a_cram_deck(tmp_path):
+    run, calls = apply_run(tmp_path, 10)
+    weak_only = {k: v for k, v in PREP.items() if not k.endswith('2')}  # the planner leaves filter 2 out
+    run.apply(plan_with([dict(weak_only, unseen=0, cards=2)], ['Fall-2026::CS3214::Exam3 cram']))
+    decks = [(a, p['name']) for a, p in calls if a in ('studiousCram', 'studiousCramDelete')]
+    assert decks == [('studiousCramDelete', 'Fall-2026::CS3214::Exam3 cram'),
+                     ('studiousCramDelete', 'Fall-2026::CS3214::Test2 cram'),  # emptied, then built again
+                     ('studiousCram', 'Fall-2026::CS3214::Test2 cram')]
+    assert [p for a, p in calls if a == 'studiousCram'] == [dict(name='Fall-2026::CS3214::Test2 cram',
+                                                                   search='cid:7,3', limit=2)]
+    assert any('patch v11' in n and 'v10' in n for n in run.attention)
+
+
+def test_old_decks_are_emptied_before_reposition_and_the_build(tmp_path):
+    run, calls = apply_run(tmp_path, 11)
+    plan = plan_with([PREP], ['Fall-2026::CS3214::Test2 cram'])
+    plan['courses'] = {'CS3214': dict(new_per_day=3, new_today=None, reposition=[5, 6])}
+    run.apply(plan)
+    order = [a for a, _ in calls if a in ('studiousCramDelete', 'studiousReposition', 'studiousCram')]
+    assert order == ['studiousCramDelete', 'studiousCramDelete', 'studiousReposition', 'studiousCram']
+
+
+def test_apply_writes_the_reading_record_and_the_plan_notes(tmp_path):
+    run, _ = apply_run(tmp_path, 11)
+    run.apply(plan_with([], reading={'courses/CS3214/lessons/08-semaphores.md': '2026-11-02'},
+                        notes=['CS3214 Test2 prep: nothing below 0.90 on exam day.']))
+    import json as _json
+    assert _json.loads((tmp_path / 'studious/reading.json').read_text()) == {
+        'courses/CS3214/lessons/08-semaphores.md': '2026-11-02'}
+    assert 'CS3214 Test2 prep: nothing below 0.90 on exam day.' in run.notes
 
 
 # ---- orphans: a card block removed from the vault ----------------------------------------------------
@@ -682,7 +772,7 @@ def test_an_apply_failure_does_not_hold_back_the_orphans(tmp_path):
             return fake.call(action, **params)
 
     daily, run = orphan_run(tmp_path, Broken())
-    plan = dict(courses={}, total_new_per_day=0, cram=[], cram_delete=[], suspend=[], unsuspend=[], retired={},
+    plan = dict(courses={}, total_new_per_day=0, prep=[], prep_delete=[], suspend=[], unsuspend=[], retired={},
                 orphans=dict(suspend=[7], unsuspend=[], restored={}, new=[]), orphaned={'g': dict(course='X', cardIds=[7])})
     run.step('apply to anki', run.apply, plan)  # two steps, as main runs them
     run.step('orphans', run.apply_orphans, plan)

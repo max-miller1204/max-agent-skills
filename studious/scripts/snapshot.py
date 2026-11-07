@@ -4,8 +4,9 @@
 # dependencies = ["markdown-it-py>=3", "pygments>=2.17", "pyyaml>=6"]
 # ///
 """Collect everything the planner needs into one state.json: vault config, goals, lessons, and
-per-course Anki state (via anki.py's AnkiConnect client), and the review load forecast from Anki's
-FSRS simulator (patch v8; without it the planner uses its built-in default curve).
+per-course Anki state (via anki.py's AnkiConnect client), the review load forecast from Anki's
+FSRS simulator (patch v8; without it the planner uses its built-in default curve), and the source
+files each course has that aren't ingested yet (manifest.py's diff).
 
     uv run snapshot.py [--vault DIR] [--today YYYY-MM-DD] [--out state.json]
 
@@ -26,15 +27,19 @@ HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('studious_anki', HERE / 'anki.py')
 anki = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(anki)
+spec = importlib.util.spec_from_file_location('studious_manifest', HERE / 'manifest.py')
+manifest = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(manifest)
 
 DEFAULTS = {
     'cards_per_day': 150,          # Anki cards a day for all courses together: new cards + reviews
     'max_lessons_per_day': 2,
     'lesson_buffer_days': 3,       # lessons done this many days before a deadline
-    'cram_days': 2,                # cram deck for the final days of a goal in cram mode
+    'prep_days': 2,                # a goal's prep deck in its final days (was cram_days)
+    'exam_recall_target': 0.90,    # prep deck: cards whose recall on exam day would be below this
     'casual_new_per_day': 5,       # courses with no deadline goal, and casual goals
     'budget_new_per_day': 10,      # self-paced budgeted goals
-    'backlog_overdue_threshold': 0,  # overdue reviews above this -> no new cards for that course
+    'backlog_overdue_threshold': 10,  # overdue reviews above this -> no new cards for that course
     'calendar_days': 7,
 }
 
@@ -112,6 +117,7 @@ def forecast(client, roots):
     except anki.Refused as exc:
         return dict(source='unavailable', reason=str(exc))
     return dict(source='anki', preset=fc['preset'], params=fc['params'], per_new_card=fc['perNewCard'],
+                decay=fc.get('decay'),  # patch v11; the planner falls back to FSRS-6's default
                 load={code: fc['load'][root] for code, root in roots.items() if root in fc['load']})
 
 
@@ -127,6 +133,40 @@ def orphan_cards(client, record):
         return None
     return {n['guid']: [dict(cardId=c['cardId'], deck=c['deck'], suspended=c['queue'] == -1) for c in n['cards']]
             for n in notes}
+
+
+def sources(vault, config):
+    """Per course (not done or retired), the new and changed source files that teach or set scope
+    (course-material, exam-blueprint; never my-work or artifacts), from manifest.py: {code: {new:
+    {folder: {kind: n}}, changed: n, base: [source folders]}}. Folders are relative to the home folder
+    and grouped one level under the course's source folder (`Fall-2026/cs4824/test2`, however deep
+    the files are); files right in the source folder count under the folder itself."""
+    out = {}
+    for code, c in (config.get('courses') or {}).items():
+        c = c or {}
+        if c.get('done') or c.get('retired') or not c.get('folders'):
+            continue
+        known, now = manifest.load(vault, code), manifest.scan(c['folders'])
+        keep = ('course-material', 'exam-blueprint')
+        bases = sorted((str(b).rstrip('/') for b in c['folders']), key=len, reverse=True)
+
+        def group(path):
+            parent = str(Path(path).parent)
+            for b in bases:
+                if parent == b or parent.startswith(b + '/'):
+                    rest = parent[len(b) + 1:]
+                    return f"{b}/{rest.split('/')[0]}" if rest else b
+            return parent
+        new = {}
+        for path, f in now.items():
+            if path not in known and f['kind'] in keep:
+                folder = new.setdefault(group(path), {})
+                folder[f['kind']] = folder.get(f['kind'], 0) + 1
+        changed = sum(1 for path, f in now.items() if path in known and f['kind'] in keep
+                      and known[path]['hash'] != f['hash'] and known[path].get('status') != 'ignored')
+        if new or changed:
+            out[str(code)] = dict(new=new, changed=changed, base=[str(b).rstrip('/') for b in c['folders']])
+    return out
 
 
 def spell_courses(config, items):
@@ -178,11 +218,16 @@ def main(argv=None):
     state = dict(today=args.today or today.isoformat(), config=config, config_set=sorted(mine),
                  goals=goals(vault), lessons=[], courses={}, errors=[], warnings=[],
                  retired=anki.vault_record(vault, 'retired')[1], pushed=anki.vault_record(vault, 'pushed')[1],
-                 orphaned=anki.vault_record(vault, 'orphaned')[1])
+                 orphaned=anki.vault_record(vault, 'orphaned')[1], reading=anki.vault_record(vault, 'reading')[1])
+    try:
+        state['sources'] = sources(vault, config)
+    except Exception as exc:  # a source folder that can't be read shouldn't stop the plan
+        state['sources'] = {}
+        state['warnings'].append(f"Couldn't check the course folders for new material: {exc}")
     try:
         state['lessons'] = lessons(vault, config)
         spell_courses(config, state['goals'] + state['lessons'])
-        state['warnings'] = placement(config, state)
+        state['warnings'] += placement(config, state)
         for goal in state['goals']:
             goal['group'] = '/'.join(anki.course_group(config, goal['course']))
         roots = {code: anki.course_root(config, code) for code in
@@ -193,8 +238,12 @@ def main(argv=None):
     # every card block in the vault, for orphan detection: the lessons' guids, then the other notes
     state['vault_guids'] = sorted({c['guid'] for l in state['lessons'] for c in l['cards'] if c['guid']}
                                   | anki.vault_guids(vault, skip={vault / l['path'] for l in state['lessons']}))
-    client =anki.Anki(int(config.get('anki_port') or 8765), os.environ.get('STUDIOUS_ANKI_PROFILE') or config.get('anki_profile'))
+    client = anki.Anki(int(config.get('anki_port') or 8765), os.environ.get('STUDIOUS_ANKI_PROFILE') or config.get('anki_profile'))
     since = int((time.time() - args.since_days * 86400) * 1000)
+    try:  # the open Anki's patch: what the prep decks can use (a second filter from v11)
+        state['patch'] = int(client.call('studiousVersion').get('patch') or 0)
+    except anki.Refused:
+        state['patch'] = None
     codes = sorted(roots)
     for code in codes:
         try:
@@ -203,6 +252,7 @@ def main(argv=None):
                 root=roots[code], today=seen['today'], counts=seen['counts'], preset=seen['preset'], revlog=seen['revlog'],
                 cards=[{**{k: c[k] for k in ('cardId', 'noteId', 'guid', 'deck', 'type', 'queue', 'due', 'reps',
                                              'lapses', 'flag', 'suspended', 'tags', 'retrievability')},
+                        'stability': c.get('stability'),
                         'owned': anki.studious_owned(c['guid'], state['pushed'])} for c in seen['cards']])
         except anki.Refused as exc:
             if 'does not exist' in str(exc):
@@ -212,7 +262,7 @@ def main(argv=None):
                 state['errors'].append(f'{code}: {exc}')
     state['forecast'] = forecast(client, {c: roots[c] for c in codes if state['courses'].get(c, {}).get('today') is not None})
     state['orphaned_cards'] = orphan_cards(client, state['orphaned'])
-    text =json.dumps(state, indent=1, ensure_ascii=False)
+    text = json.dumps(state, indent=1, ensure_ascii=False)
     if args.out:
         Path(args.out).write_text(text, encoding='utf-8')
     else:
