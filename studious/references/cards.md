@@ -74,7 +74,10 @@ uv run scripts/anki.py push courses/Fall-2026/CS3214/lessons/07-condition-variab
 Push assigns ids, refuses lessons that aren't `verified: true`, and creates new cards only after
 the lesson is `done: true` (or `--ungated` in cram mode). Cards already in Anki are updated in place,
 keeping their review history. Every push records each card's fingerprint in `studious/pushed.json`,
-and the daily run pushes again any lesson whose cards in Anki were edited since. The lesson's `deck`
+and the daily run pushes again any lesson whose cards in Anki were edited since. A card whose block
+changed since its last push also loses Anki's `leech` tag (patch v11): fixing a leech's block is
+what takes it off the inbox's leech count (`anki.py clear-leech GUID` does it for a leech that was
+fine). The lesson's `deck`
 is its topic (`L_CondVars`); studious puts it under the course deck (`CS3214::L_CondVars`, or
 `<group>::CS3214::L_CondVars` when the course has a `group`). A `deck` naming another course is refused.
 
