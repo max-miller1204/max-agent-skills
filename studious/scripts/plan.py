@@ -163,8 +163,14 @@ def source_lines(sources):
     return out
 
 
+def review_day(ms, tz):
+    """The Anki day a review at `ms` counts for: the day rolls over at 4am, so a 1am review is the day
+    before's. timetable.py uses this too."""
+    return (datetime.datetime.fromtimestamp(ms / 1000, tz) - datetime.timedelta(hours=4)).date()
+
+
 def review_days(courses, retired, tz):
-    """Distinct cards reviewed per Anki day (rolling over at 4am), from every course's review log."""
+    """Distinct cards reviewed per Anki day (review_day), from every course's review log."""
     per_day = {}
     for code, course in courses.items():
         if code in retired:
@@ -172,8 +178,7 @@ def review_days(courses, retired, tz):
         for r in course.get('revlog') or []:
             if r.get('kind') in (4, 5) or r.get('ease') == 0:  # manual reschedules aren't reviews
                 continue
-            d = (datetime.datetime.fromtimestamp(r['id'] / 1000, tz) - datetime.timedelta(hours=4)).date()
-            per_day.setdefault(d, set()).add(r['cardId'])
+            per_day.setdefault(review_day(r['id'], tz), set()).add(r['cardId'])
     return per_day
 
 
@@ -676,9 +681,11 @@ def plan(state):
 
     # ---- prep decks: the last prep_days of every deadline goal, through the exam day -------------------
     decay = (forecast.get('decay') if from_anki else None) or DEFAULT_DECAY
-    # A patch older than v11 builds the weak cards only (no second filter), as `<goal> cram`.
-    two_filters = state.get('patch') is None or int(state['patch']) >= 11
-    prep, notes, prep_cards = [], [], {}
+    # A patch older than v11 has no prep names, orders or second filter: its deck is the weak cards
+    # only, under the old `<goal> cram` name, and the inbox says what was left out.
+    patch = state.get('patch')
+    two_filters = patch is None or int(patch) >= 11
+    prep, notes, prep_cards, held_back = [], [], {}, []
     taken = set()  # a card goes to the nearest goal's deck only: a filtered deck can't share it
     for g in sorted(exam_today + deadline_goals, key=lambda g: (g['days_left'], g['course'], g['id'])):
         if g['days_left'] > prep_days:
@@ -693,18 +700,25 @@ def plan(state):
                 weak.append((r, c['cardId']))
         weak.sort()
         taken |= {i for _, i in weak}
-        unseen = len([i for i in g['scope_new'] if i not in taken]) if g['cram'] and two_filters else 0
+        unseen = len([i for i in g['scope_new'] if i not in taken]) if g['cram'] else 0
+        held = 0 if two_filters else unseen  # unseen cards an older patch can't put in
+        if held:
+            held_back.append(f"{g['course']} {g['id']} ({plural(held, 'unseen card')})")
+            unseen = 0
         if unseen:
             taken |= set(g['scope_new'])
         name, root = prep_name(g, courses), root_deck(g, courses)
         new_search = f'deck:"{root}" tag:{g["course"]}::exam::{g["id"]} is:new -is:suspended'
+        weak_search = 'cid:' + ','.join(str(i) for _, i in weak)
         if not weak and not unseen:
-            notes.append(f"{g['course']} {g['id']} prep: nothing below {target:.2f} on exam day"
-                         + (' and no unseen cards.' if g['cram'] else '.'))
+            if not held:  # held cards are in the patch warning instead
+                notes.append(f"{g['course']} {g['id']} prep: nothing below {target:.2f} on exam day"
+                             + (' and no unseen cards.' if g['cram'] else '.'))
             continue
-        if weak:
-            deck = dict(name=name, search='cid:' + ','.join(str(i) for _, i in weak), limit=len(weak),
-                        order=ORDER_RETRIEVABILITY)
+        if not two_filters:
+            deck = dict(name=cram_name(g, courses), search=weak_search, limit=len(weak))
+        elif weak:
+            deck = dict(name=name, search=weak_search, limit=len(weak), order=ORDER_RETRIEVABILITY)
             if unseen:
                 deck.update(search2=new_search, limit2=9999, order2=ORDER_DUE)
         else:
@@ -713,6 +727,12 @@ def plan(state):
                          cards=len(weak) + unseen))
         prep_cards[(g['course'], g['id'])] = len(weak) + unseen
     deck_delete -= {d['name'] for d in prep}
+    if not two_filters and (prep or held_back):
+        warnings.append(f"Prep decks need the studious patch v11 (this machine's Anki runs v{patch}): "
+                        + ("only the cards below the exam-day target went in, as `<goal> cram`" if prep
+                           else "no prep deck could be built")
+                        + (f", without a cram goal's unseen cards: {', '.join(held_back)}" if held_back else '')
+                        + ". In the connectors clone: git pull, python3 anki/apply.py, then restart Anki.")
 
     # ---- inbox: what needs ingesting, courses with nothing ahead, late lessons, leeches --------------
     inbox += source_lines(state.get('sources') or {})
@@ -767,8 +787,8 @@ def plan(state):
                 continue
             when = 'today' if left == 0 else plural(left, 'day') + ' left'
             if left <= prep_days:
-                if k == 0 and (g['course'], g['id']) not in prep_cards:
-                    continue  # nothing in today's prep deck
+                if g['days_left'] <= prep_days and (g['course'], g['id']) not in prep_cards:
+                    continue  # its prep days have started and today's deck is empty: no promise for later days
                 count = f", {plural(prep_cards[(g['course'], g['id'])], 'card')}" if k == 0 else ''
                 lines.append(f"• Prep: {g['course']} {g['id']}{count} ({when}{', cram mode' if g['cram'] else ''})")
             elif g['cram']:

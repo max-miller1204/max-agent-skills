@@ -227,12 +227,14 @@ def test_goals_written_as_one_value_are_a_list():
 class FakeAnki:
     """studiousNotes and studiousUpsertNotes against an in-memory set of guids."""
 
-    def __init__(self):
-        self.guids = set()
+    def __init__(self, patch=11):
+        self.guids, self.tags, self.patch = set(), {}, patch
 
     def call(self, action, **params):
         if action == 'studiousNotes':
-            return [dict(guid=g) for g in params['guids'] if g in self.guids]
+            return [dict(guid=g, tags=self.tags.get(g, [])) for g in params['guids'] if g in self.guids]
+        if action == 'studiousVersion':
+            return dict(patch=self.patch)
         assert action == 'studiousUpsertNotes'
         out = []
         self.sent = getattr(self, 'sent', []) + params['notes']
@@ -291,18 +293,35 @@ def test_push_reports_a_refusal_and_goes_on_to_the_next_lesson(tmp_path):
     assert report[1]['errors'] == [] and report[1]['created'] == 2
 
 
-def test_push_drops_the_leech_tag_only_from_fixed_cards(tmp_path):
+def leech_push(tmp_path, patch, recorded=True):
+    """Push a lesson, tag both notes `leech`, edit one card block, push again: the second push's notes."""
     path = write_lesson(tmp_path, LESSON.replace('done: false', 'done: true'))
-    fake = FakeAnki()
+    fake = FakeAnki(patch)
     anki.push(fake, str(tmp_path), [str(path)])
     assert not any('dropTags' in n for n in fake.sent)  # new notes: nothing to drop
-    fake.sent = []
-    anki.push(fake, str(tmp_path), [str(path)])
-    assert not any('dropTags' in n for n in fake.sent)  # unchanged blocks keep a leech tag
+    fake.tags = {g: ['leech'] for g in fake.guids}
+    if not recorded:
+        (tmp_path / 'studious/pushed.json').write_text('{}')
     path.write_text(path.read_text().replace('Waking does not', 'Waking alone does not'))
     fake.sent = []
-    anki.push(fake, str(tmp_path), [str(path)])
-    assert [n.get('dropTags') for n in fake.sent].count(['leech']) == 1  # only the edited card
+    report = anki.push(fake, str(tmp_path), [str(path)])
+    return fake.sent, report[0]
+
+
+def test_push_drops_the_leech_tag_only_from_fixed_cards(tmp_path):
+    sent, report = leech_push(tmp_path, 11)
+    assert [n.get('dropTags') for n in sent].count(['leech']) == 1  # the edited card only
+    assert 'leechKept' not in report
+
+
+def test_an_older_patch_keeps_the_leech_tag_and_says_so(tmp_path):
+    sent, report = leech_push(tmp_path, 10)
+    assert not any('dropTags' in n for n in sent) and len(report['leechKept']) == 1
+
+
+def test_a_card_with_no_push_record_keeps_its_leech_tag(tmp_path):
+    sent, report = leech_push(tmp_path, 11, recorded=False)
+    assert not any('dropTags' in n for n in sent) and 'leechKept' not in report
 
 
 def test_snapshot_lists_new_and_changed_sources(tmp_path, monkeypatch):
@@ -319,11 +338,28 @@ def test_snapshot_lists_new_and_changed_sources(tmp_path, monkeypatch):
     (vault / 'studious/manifests').mkdir(parents=True)
     known = snapshot.manifest.scan(['cs4824'])
     (vault / 'studious/manifests/CS4824.json').write_text(json.dumps(
-        {'cs4824/notes/03.pdf': dict(known['cs4824/notes/03.pdf'], hash='old', status='ingested')}))
+        {'cs4824/notes/03.pdf': dict(hash='old', kind='course-material', status='ingested')}))  # no size or mtime: reread
     config = {'courses': {'CS4824': {'folders': ['cs4824']}, 'Old': {'folders': ['done'], 'done': True}}}
     assert snapshot.sources(vault, config) == {'CS4824': dict(
         new={'cs4824/notes': {'course-material': 2}, 'cs4824/test2': {'exam-blueprint': 1}}, changed=1,
         base=['cs4824'])}  # homework (my-work) and done courses left out
+
+
+def test_manifest_scan_rereads_only_what_it_must(tmp_path, monkeypatch):
+    sspec = importlib.util.spec_from_file_location('snapshot', SCRIPTS / 'snapshot.py')
+    snapshot = importlib.util.module_from_spec(sspec)
+    sspec.loader.exec_module(snapshot)
+    m = snapshot.manifest
+    monkeypatch.setenv('HOME', str(tmp_path))
+    (tmp_path / 'c/notes').mkdir(parents=True)
+    (tmp_path / 'c/notes/a.pdf').write_text('a')
+    (tmp_path / 'c/notes/b.pdf').write_text('b')
+    first = m.scan(['c'])
+    known = {'c/notes/a.pdf': dict(first['c/notes/a.pdf'], hash='kept')}  # same size and mtime: not reread
+    again = m.scan(['c'], known, hash_new=False)
+    assert again['c/notes/a.pdf']['hash'] == 'kept' and again['c/notes/b.pdf']['hash'] is None
+    known['c/notes/a.pdf']['mtime'] -= 1  # touched since: hashed again
+    assert m.scan(['c'], known, hash_new=False)['c/notes/a.pdf']['hash'] == first['c/notes/a.pdf']['hash']
 
 
 def test_snapshot_spells_course_codes_as_the_config_does():
@@ -542,17 +578,17 @@ def test_prep_deck_on_patch_v11_sends_both_filters(tmp_path):
     assert not run.attention
 
 
-def test_an_older_patch_gets_the_weak_cards_as_a_cram_deck(tmp_path):
+def test_the_daily_run_builds_the_deck_the_planner_fitted_to_the_patch(tmp_path):
     run, calls = apply_run(tmp_path, 10)
-    weak_only = {k: v for k, v in PREP.items() if not k.endswith('2')}  # the planner leaves filter 2 out
-    run.apply(plan_with([dict(weak_only, unseen=0, cards=2)], ['Fall-2026::CS3214::Exam3 cram']))
+    old = dict(name='Fall-2026::CS3214::Test2 cram', goal='Test2', course='CS3214', search='cid:7,3', limit=2,
+               weak=2, unseen=0, cards=2)  # what plan.py makes for a patch older than v11
+    run.apply(plan_with([old], ['Fall-2026::CS3214::Exam3 cram']))
     decks = [(a, p['name']) for a, p in calls if a in ('studiousCram', 'studiousCramDelete')]
     assert decks == [('studiousCramDelete', 'Fall-2026::CS3214::Exam3 cram'),
                      ('studiousCramDelete', 'Fall-2026::CS3214::Test2 cram'),  # emptied, then built again
                      ('studiousCram', 'Fall-2026::CS3214::Test2 cram')]
     assert [p for a, p in calls if a == 'studiousCram'] == [dict(name='Fall-2026::CS3214::Test2 cram',
                                                                    search='cid:7,3', limit=2)]
-    assert any('patch v11' in n and 'v10' in n for n in run.attention)
 
 
 def test_old_decks_are_emptied_before_reposition_and_the_build(tmp_path):

@@ -74,7 +74,12 @@ def classify(rel):
     return 'course-material'
 
 
-def scan(folders):
+def scan(folders, known=None, hash_new=True):
+    """Every source file under the folders: {path: {hash, kind, size, mtime}}. A file whose size and
+    mtime match its `known` manifest entry keeps that entry's hash without being read again; with
+    `hash_new=False`, files the manifest doesn't know get no hash (None), since being new is all the
+    daily run needs to know about them."""
+    known = known or {}
     files = {}
     for folder in folders:
         root = Path.home() / folder
@@ -91,8 +96,15 @@ def scan(folders):
                 kind = classify(rel)
                 if kind == 'artifact':
                     continue
-                files[rel] = dict(hash=hashlib.sha256(path.read_bytes()).hexdigest()[:16], kind=kind,
-                                  size=path.stat().st_size)
+                st = path.stat()
+                old = known.get(rel) or {}
+                if old.get('hash') and old.get('size') == st.st_size and old.get('mtime') == st.st_mtime_ns:
+                    digest = old['hash']
+                elif rel in known or hash_new:
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+                else:
+                    digest = None
+                files[rel] = dict(hash=digest, kind=kind, size=st.st_size, mtime=st.st_mtime_ns)
     return files
 
 
@@ -128,7 +140,8 @@ def main(argv=None):
             if course not in courses:
                 out[course] = dict(error='not in studious/config.md courses')
                 continue
-            known, now = load(vault, course), scan(courses[course].get('folders') or [])
+            known = load(vault, course)
+            now = scan(courses[course].get('folders') or [], known, hash_new=False)
             if a.under:
                 now = {p: f for p, f in now.items() if p.startswith(a.under.rstrip('/') + '/')}
                 known = {p: f for p, f in known.items() if p.startswith(a.under.rstrip('/') + '/')}
@@ -152,13 +165,14 @@ def main(argv=None):
     if course not in courses or not paths:
         print(json.dumps(dict(error='usage: accept|ignore COURSE PATH...')))
         return 1
-    data, now = load(vault, course), scan(courses[course].get('folders') or [])
+    data = load(vault, course)
+    now = scan(courses[course].get('folders') or [], data)
     for p in paths:
         rel = os.path.relpath(Path(p).expanduser().resolve(), Path.home()) if os.path.isabs(os.path.expanduser(p)) else p
         if rel not in now:
             print(json.dumps(dict(error=f'{rel} is not a source file of {course}')))
             return 1
-        data[rel] = dict(hash=now[rel]['hash'], kind=now[rel]['kind'],
+        data[rel] = dict(hash=now[rel]['hash'], kind=now[rel]['kind'], size=now[rel]['size'], mtime=now[rel]['mtime'],
                          status='ignored' if a.cmd == 'ignore' else 'ingested',
                          **({'lesson': a.lesson} if a.lesson and a.cmd == 'accept' else {}))
     save(vault, course, data)

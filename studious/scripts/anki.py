@@ -547,6 +547,7 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
     orphans_before = dict(orphans)
     config = vault_config(vault)
     report = []
+    drops_tags = None  # whether the open Anki's patch takes dropTags (v11), asked once when needed
     for path in lesson_files(paths):
         text = path.read_text(encoding='utf-8')
         lesson, _ = read_frontmatter(text)
@@ -588,7 +589,8 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
         if entry['errors']:
             continue
         try:
-            existing = {n['guid'] for n in anki.call('studiousNotes', guids=[n['guid'] for n in notes])} if notes else set()
+            tags_now = {n['guid']: n.get('tags') or [] for n in anki.call('studiousNotes', guids=[n['guid'] for n in notes])} if notes else {}
+            existing = set(tags_now)
         except Refused as exc:
             entry['errors'].append(str(exc))
             continue
@@ -614,9 +616,21 @@ def push(anki, vault, paths, ungated=False, dry_run=False):
                     note['fields'][k] = v
         course = lesson['course']
         hashes = {c['meta']['id']: card_hash(text, c) for c in cards}
-        for note in send:  # a card block fixed since its last push stops being a leech (patch v11)
-            if note['guid'] in existing and record.get(note['guid']) != hashes.get(note['guid']):
+        # A card block fixed since its last recorded push stops being a leech. An older patch ignores
+        # dropTags, so there the tag stays and the report says so (clear-leech once it's updated).
+        fixed = [n for n in send if n['guid'] in record and record[n['guid']] != hashes.get(n['guid'])
+                 and any(t.lower() == 'leech' for t in tags_now.get(n['guid']) or [])]
+        if fixed and drops_tags is None:
+            try:
+                patch = anki.call('studiousVersion').get('patch')
+            except Refused:
+                patch = None
+            drops_tags = patch is None or int(patch) >= 11
+        for note in fixed:
+            if drops_tags:
                 note['dropTags'] = ['leech']
+        if fixed and not drops_tags:
+            entry['leechKept'] = [n['guid'] for n in fixed]
         try:
             results = anki.call('studiousUpsertNotes', notes=send,
                                 ownedTagPrefixes=[f'{course}::exam::', f'{course}::cheatsheet::'])
@@ -833,7 +847,13 @@ def main(argv=None):
         elif args.cmd in ('suspend', 'unsuspend'):
             out = anki.call('studiousSuspend', cardIds=args.cards, suspended=args.cmd == 'suspend')
         elif args.cmd == 'clear-leech':
-            out = anki.call('studiousRemoveTags', guids=args.guids, tags=['leech'])
+            try:
+                out = anki.call('studiousRemoveTags', guids=args.guids, tags=['leech'])
+            except Refused as exc:
+                if 'unsupported action' in str(exc).lower():
+                    raise Refused('nothing changed: clear-leech needs the studious patch v11. Run '
+                                  '`python3 ~/.local/share/studious/connectors/anki/apply.py`, restart Anki, retry')
+                raise
         elif args.cmd == 'delete-notes':
             guids = args.guids + (Path(args.file).read_text(encoding='utf-8').split() if args.file else [])
             out = delete_notes(anki, args.vault, guids, args.dry_run)

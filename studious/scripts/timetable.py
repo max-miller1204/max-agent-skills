@@ -16,6 +16,7 @@ Colors: green >= rag_green (0.90), amber >= rag_amber (0.75), red below, grey un
 import argparse
 import datetime
 import html
+import importlib.util
 import json
 import os
 import sys
@@ -25,6 +26,10 @@ from zoneinfo import ZoneInfo
 
 COLORS = {'green': 'rgba(46,160,67,.35)', 'amber': 'rgba(210,153,34,.40)', 'red': 'rgba(218,54,51,.40)',
           'grey': 'rgba(128,128,128,.18)'}
+_spec = importlib.util.spec_from_file_location('studious_plan', Path(__file__).resolve().parent / 'plan.py')
+planner = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(planner)
+review_day = planner.review_day  # the 4am Anki-day rollover, shared with the planner's 7-day average
 MAX_DATES = 12
 MIN_REVIEWS = 3  # fewer reviews of a topic on a day: a grey cell with the count, not a percentage
 
@@ -40,11 +45,6 @@ def rag(value, cfg):
 def cell(text, color, title=''):
     tip = f' title="{html.escape(title)}"' if title else ''
     return f'<td style="background:{COLORS[color]};text-align:center"{tip}>{html.escape(text)}</td>'
-
-
-def review_day(ms, tz):
-    # Anki's day rolls over at 4am; a 1am review counts for the day before.
-    return (datetime.datetime.fromtimestamp(ms / 1000, tz) - datetime.timedelta(hours=4)).date()
 
 
 def filename(goal):

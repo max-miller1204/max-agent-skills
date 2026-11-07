@@ -592,6 +592,11 @@ def test_every_goal_gets_a_prep_deck_of_cards_below_target_on_exam_day():
     assert '• Prep: CS3214 Test2 (1 day left)' in p['days'][1]['description']
 
 
+def test_an_empty_prep_window_promises_no_deck_on_later_days():
+    p = planner.plan(state([goal(date='2026-11-03')], courses={'CS3214': course([reviewed(1, 0.99, 300)])}))
+    assert not any('Prep:' in d['description'] for d in p['days'])
+
+
 def test_prep_deck_waits_for_the_last_prep_days():
     p = planner.plan(state([goal(date='2026-11-04')], courses={'CS3214': course([reviewed(1, 0.8, 2)])}))
     assert p['prep'] == [] and 'CS3214::Test2 prep' in p['prep_delete']
@@ -762,15 +767,25 @@ def test_a_card_goes_to_the_nearest_goals_prep_deck_only():
     assert [(d['name'], d['search']) for d in p['prep']] == [('CS3214::Test2 prep', 'cid:1'), ('CS3214::Final prep', 'cid:2')]
 
 
-def test_an_older_patch_gets_no_unseen_filter():
+def test_an_older_patch_gets_the_weak_cards_as_a_cram_deck_and_a_warning():
     cards = [reviewed(1, 0.8, 5)] + [card(10 + i, goals=['Test2']) for i in range(5)]
     s = state([goal(date='2026-11-03', cram=True)], courses={'CS3214': course(cards)})
     s['patch'] = 10
     p = planner.plan(s)
-    assert 'search2' not in p['prep'][0] and p['prep'][0]['cards'] == 1
+    assert p['prep'] == [dict(name='CS3214::Test2 cram', search='cid:1', limit=1, goal='Test2', course='CS3214',
+                              weak=1, unseen=0, cards=1)]  # no prep name, order or second filter before v11
+    assert 'CS3214::Test2 cram' not in p['prep_delete'] and 'CS3214::Test2 prep' in p['prep_delete']
     assert '• Prep: CS3214 Test2, 1 card (2 days left, cram mode)' in p['days'][0]['description']
-    s['courses'] = {'CS3214': course(cards[1:])}
-    assert planner.plan(s)['prep'] == []  # unseen cards only: nothing an older patch can build
+    assert [w for w in p['warnings'] if 'patch v11' in w] == [
+        "Prep decks need the studious patch v11 (this machine's Anki runs v10): only the cards below the exam-day "
+        "target went in, as `<goal> cram`, without a cram goal's unseen cards: CS3214 Test2 (5 unseen cards). "
+        "In the connectors clone: git pull, python3 anki/apply.py, then restart Anki."]
+    s['courses'] = {'CS3214': course(cards[1:])}  # unseen cards only: nothing an older patch can build
+    p = planner.plan(s)
+    assert p['prep'] == [] and p['notes'] == []  # no "nothing below target and no unseen cards"
+    assert any('no prep deck could be built, without a cram goal' in w and '5 unseen cards' in w for w in p['warnings'])
+    s['patch'] = 11
+    assert not any('patch v11' in w for w in planner.plan(s)['warnings'])
 
 
 def test_a_leech_note_counts_once():

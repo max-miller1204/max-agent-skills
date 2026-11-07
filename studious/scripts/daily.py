@@ -14,8 +14,8 @@
    and edits and retags of cards already in Anki; re-snapshot and re-plan if anything was pushed.
 4. As a step of its own, suspend notes whose card block is gone from the vault (listed in the inbox)
    and unsuspend those whose block is back. Then apply the plan to Anki: new cards/day per course,
-   today-only overrides, reposition, prep decks (patch v11; an older patch gets only the weak-card
-   part, as `<goal> cram`), and the reading record.
+   today-only overrides, reposition, prep decks (as the planner fitted them to the patch: an older
+   one than v11 gets only the weak-card part, as `<goal> cram`), and the reading record.
 5. Regenerate the timetables, write the calendar events.
 6. AnkiWeb sync again, quit Anki if this run started it, write the inbox, commit the vault (local git).
 7. Write a run log outside the vault, to ~/.local/state/studious/runs/<vault>/ (the last 60 are kept).
@@ -134,7 +134,6 @@ class Run:
         self.attention = []  # notes the user has to act on: they go to the inbox too
         self.orphans = []  # notes suspended this run because their card block is gone: listed in the inbox
         self.launched_anki = False
-        self.patch = None  # the open Anki's studious patch version, from studiousVersion
         self.pushed = False  # whether a push changed Anki, even if another lesson failed
 
     def step(self, name, fn, *args, required=False):
@@ -193,7 +192,6 @@ class Run:
                 raise RuntimeError('Anki did not start within 60 s' + (f': {display_note}' if display_note else ''))
         if version['profile'] != self.client.profile:
             raise RuntimeError(f"Anki is open on profile {version['profile']!r}, not {self.client.profile!r}")
-        self.patch = int(version.get('patch') or 0)
         return version
 
     def anki_sync(self):
@@ -236,11 +234,13 @@ class Run:
             moved.append(dict(course=code, old=old[0], new=root))
         return moved
 
-    def make_plan(self):
+    def make_plan(self, again=False):
+        """Snapshot and plan. `again` (the re-plan after a push) reuses the first snapshot's source scan."""
         cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'studious'
         state_path = cache / f'state-{self.vault.name}.json'  # scratch, kept out of the synced vault
         state_path.parent.mkdir(parents=True, exist_ok=True)
-        code = snapshot.main(['--vault', str(self.vault), '--out', str(state_path)])
+        code = snapshot.main(['--vault', str(self.vault), '--out', str(state_path)]
+                             + (['--sources-from', str(state_path)] if again else []))
         state = json.loads(state_path.read_text())
         if code:
             raise RuntimeError('; '.join(state['errors']))
@@ -258,6 +258,11 @@ class Run:
             except Exception as exc:  # one lesson's failure doesn't stop the others
                 report.append(dict(lesson=item['path'], errors=[str(exc)]))
         self.pushed = any(r.get('created') or r.get('updated') for r in report)
+        kept = [g for r in report for g in r.get('leechKept') or []]
+        if kept:
+            self.note(f"{planner.plural(len(kept), 'fixed leech')} kept the `leech` tag: this machine's Anki runs a "
+                      "patch older than v11. In the connectors clone: git pull, python3 anki/apply.py, restart "
+                      f"Anki, then `anki.py clear-leech {' '.join(kept)}`.", attention=True)
         problems = [f"{r['lesson']}: {e}" for r in report for e in r.get('errors') or []]
         if problems:
             raise RuntimeError('; '.join(problems))
@@ -292,14 +297,9 @@ class Run:
                 raise
         # Empty every prep and old cram deck first, today's included: Anki won't put a card that sits in
         # another filtered deck into a new one, and repositioning reaches only cards in their home deck.
-        old_patch = (self.patch or 0) < 11  # no prep names, orders or second filter before v11
-        builds = []
-        for deck in plan['prep']:
-            params = {k: deck[k] for k in ('name', 'search', 'limit', 'order', 'search2', 'limit2', 'order2')
-                      if deck.get(k) is not None}
-            if old_patch:  # the planner left the unseen cards out; the old name rule wants `cram`
-                params = dict(name=deck['name'][:-len(' prep')] + ' cram', search=deck['search'], limit=deck['limit'])
-            builds.append((deck, params))
+        # The planner already fitted each deck to the open Anki's patch (state `patch`).
+        builds = [(deck, {k: deck[k] for k in ('name', 'search', 'limit', 'order', 'search2', 'limit2', 'order2')
+                          if deck.get(k) is not None}) for deck in plan['prep']]
         for name in sorted(set(plan['prep_delete']) | {p['name'] for _, p in builds}):
             try:
                 self.client.call('studiousCramDelete', name=name)
@@ -316,11 +316,6 @@ class Run:
                     self.note(f"{deck['course']} {deck['goal']} prep: no cards matched (reviewed since the plan?).")
                 else:
                     self.note(f"{params['name']} not built: {exc}", attention=True)
-        if old_patch and plan['prep']:
-            self.note(f"Prep decks need the studious patch v11 (this machine's Anki runs v{self.patch}): only the "
-                      "cards below the exam-day target went in, as `<goal> cram`, without a cram goal's unseen "
-                      "cards. In the connectors clone: git pull, python3 anki/apply.py, then restart Anki.",
-                      attention=True)
         if plan['suspend']:
             self.client.call('studiousSuspend', cardIds=plan['suspend'], suspended=True)
         if plan['unsuspend']:
@@ -483,7 +478,7 @@ def main(argv=None):
         if plan['push']:
             run.step('push cards', run.push, plan['push'])
             if run.pushed and not args.dry_run:  # also when another lesson failed: Anki changed either way
-                state, plan = run.step('re-plan', run.make_plan, required=True)
+                state, plan = run.step('re-plan', run.make_plan, True, required=True)
         # Orphans first, so a prep deck never takes a card this run suspends; each step on its own, so
         # one failing doesn't hold the other back.
         run.step('orphans', run.apply_orphans, plan)

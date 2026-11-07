@@ -146,7 +146,8 @@ def sources(vault, config):
         c = c or {}
         if c.get('done') or c.get('retired') or not c.get('folders'):
             continue
-        known, now = manifest.load(vault, code), manifest.scan(c['folders'])
+        known = manifest.load(vault, code)
+        now = manifest.scan(c['folders'], known, hash_new=False)  # new files need no hash
         keep = ('course-material', 'exam-blueprint')
         bases = sorted((str(b).rstrip('/') for b in c['folders']), key=len, reverse=True)
 
@@ -209,6 +210,8 @@ def main(argv=None):
     parser.add_argument('--vault', default=os.environ.get('STUDIOUS_VAULT', str(Path.home() / 'studious')))
     parser.add_argument('--today', help='YYYY-MM-DD (default: today)')
     parser.add_argument('--since-days', type=int, default=120)
+    parser.add_argument('--sources-from', help="an earlier state.json whose source scan to reuse (the daily "
+                                                 "run's re-plan: a push doesn't change source files)")
     parser.add_argument('--out')
     args = parser.parse_args(argv)
     vault = Path(args.vault)
@@ -219,8 +222,10 @@ def main(argv=None):
                  goals=goals(vault), lessons=[], courses={}, errors=[], warnings=[],
                  retired=anki.vault_record(vault, 'retired')[1], pushed=anki.vault_record(vault, 'pushed')[1],
                  orphaned=anki.vault_record(vault, 'orphaned')[1], reading=anki.vault_record(vault, 'reading')[1])
+    earlier = Path(args.sources_from) if args.sources_from else None
     try:
-        state['sources'] = sources(vault, config)
+        reuse = json.loads(earlier.read_text()).get('sources') if earlier and earlier.exists() else None
+        state['sources'] = reuse if reuse is not None else sources(vault, config)
     except Exception as exc:  # a source folder that can't be read shouldn't stop the plan
         state['sources'] = {}
         state['warnings'].append(f"Couldn't check the course folders for new material: {exc}")
