@@ -24,7 +24,7 @@ This is his method, not his voice. Do not imitate how he spoke.
 - Simplify by leaving things out, never by saying something false. The reader should be able to build on this later without unlearning it.
 - Where the simple picture stops being true, or the answer is not known, say so plainly.
 
-Write it as connected prose, the way you would say it out loud to them, not as a document with a section per bullet above. Length follows the idea: a few paragraphs covers most things.
+Write it as connected prose, the way you would say it out loud to them, not as a document with a section per bullet above. A short snippet, a traced run, or a small table is fine when it is the worked case. Length follows the idea: a few paragraphs covers most things.
 
 ## Check the result
 
